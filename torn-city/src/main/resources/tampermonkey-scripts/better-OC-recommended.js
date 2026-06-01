@@ -604,8 +604,11 @@
         simplifyBtn.addEventListener('click', () => {
             // 存储 *新* 的状态
             localStorage.setItem(LS_KEY_SIMPLIFY, !simplifyEnabled);
-            // 清除浏览器历史记录并重新加载，避免表单提示
-            window.location.assign(window.location.pathname + window.location.search);
+            // 清除表单提交状态，然后重新加载当前页面
+            if (window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.href);
+            }
+            window.location.reload();
         });
 
         // --- 工分类型切换逻辑 ---
@@ -621,8 +624,11 @@
         scoreTypeToggleBtn.addEventListener('click', () => {
             const newScoreType = scoreType === 'total' ? 'daily' : 'total';
             localStorage.setItem(LS_KEY_SCORE_TYPE, newScoreType);
-            // 清除浏览器历史记录并重新加载，避免表单提示
-            window.location.assign(window.location.pathname + window.location.search);
+            // 清除表单提交状态，然后重新加载当前页面
+            if (window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.href);
+            }
+            window.location.reload();
         });
 
         // 将工分类型切换按钮插入到简化按钮之后
@@ -661,8 +667,11 @@
                                     // 缓存帮派信息
                                     setCachedData(LS_KEY_USER_FACTION, data.faction, CACHE_EXPIRATION);
                                     alert(`API Key 设置成功！\n帮派: ${data.faction.name}\nID: ${data.faction.id}\n页面将刷新以应用新配置。`);
-                                    // 清除浏览器历史记录并重新加载，避免表单提示
-                                    window.location.assign(window.location.pathname + window.location.search);
+                                    // 清除表单提交状态，然后重新加载当前页面
+                                    if (window.history.replaceState) {
+                                        window.history.replaceState(null, '', window.location.href);
+                                    }
+                                    window.location.reload();
                                 } else {
                                     alert('API Key 无效或响应格式错误');
                                 }
