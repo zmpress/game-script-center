@@ -5,8 +5,9 @@
 // @author       zmpress [3633431]
 // @match        https://www.torn.com/factions.php?step=your*
 // @grant        GM_xmlhttpRequest
-// @updateURL    https://raw.githubusercontent.com/zmpress/game_script/refs/heads/main/porn_city/userscript/OCSortAndDisplay.js
-// @downloadURL    https://raw.githubusercontent.com/zmpress/game_script/refs/heads/main/porn_city/userscript/OCSortAndDisplay.js
+// @updateURL    https://raw.githubusercontent.com/zmpress/game-script-center/refs/heads/main/torn-city/src/main/resources/tampermonkey-scripts/better-OC-recommended.js
+// @downloadURL    https://raw.githubusercontent.com/zmpress/game-script-center/refs/heads/main/torn-city/src/main/resources/tampermonkey-scripts/better-OC-recommended.js
+//
 // ==/UserScript==
 
 (function () {
@@ -32,8 +33,14 @@
     // 获取当前用户的帮派ID，优先从 API 缓存获取，其次从手动设置获取
     let currentFactionId = '20465'; // 默认值
 
-    // 推荐模式状态
-    let recommendMode = localStorage.getItem(LS_KEY_RECOMMEND_MODE) === 'true';
+    // 推荐模式状态（默认为 false，需要手动开启）
+    // 注意：这里强制设置为 false，不读取 localStorage，确保每次打开页面都是关闭状态
+    let recommendMode = false;
+    
+    // 推荐显示相关变量
+    let lastRecommendationExecution = 0; // 上次推荐执行时间
+    const RECOMMEND_DEBOUNCE_TIME = 1000; // 1秒防抖延迟
+    let recommendationExecuting = false; // 防止并发执行
 
     // 原有的功能开关（保留，以防你需要手动关闭）
     const isShowInfluence = true;
@@ -2172,63 +2179,84 @@
             });
             return;
         }
-
-        // 执行推荐算法
-        const recommendations = executeRecommendation(5);
-
-        if (recommendations.length === 0) {
+            
+        // 防抖检查：防止频繁执行
+        const now = Date.now();
+        if (now - lastRecommendationExecution < RECOMMEND_DEBOUNCE_TIME) {
+            console.log('[OCSort] 推荐算法正在防抖中，跳过本次执行');
             return;
         }
-
-        // 为推荐的 OC 添加标记，隐藏非推荐的 OC
-        const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
-        cards.forEach(card => {
-            const ocId = card.dataset.ocId;
-            const rec = recommendations.find(r => r.ocId === ocId);
-
-            if (rec) {
-                // 显示的 OC：移除隐藏类
-                card.classList.remove('oc-hidden-card');
-
-                // 添加高亮边框
-                card.style.border = '3px solid #ffd700';
-                card.style.boxShadow = '0 0 15px rgba(255, 215, 0, 0.6)';
-                card.style.opacity = '1';
-
-                // 添加推荐语徽章
-                const scenario = card.querySelector('[class*="scenario___"]');
-                if (scenario && !scenario.querySelector('.oc-recommend-badge')) {
-                    const badge = document.createElement('div');
-                    badge.className = 'oc-recommend-badge';
-                    badge.textContent = `🌟 ${rec.reason}`;
-                    badge.title = `推荐分数: ${rec.recommendScore}\n推荐岗位: ${rec.recommendedPosition}`;
-
-                    Object.assign(badge.style, {
-                        position: 'absolute',
-                        top: '-10px',
-                        left: '10px',
-                        zIndex: '10',
-                        padding: '5px 12px',
-                        background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                        color: '#fff',
-                        borderRadius: '20px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                        whiteSpace: 'nowrap'
-                    });
-
-                    scenario.style.position = 'relative';
-                    scenario.appendChild(badge);
-                }
-            } else {
-                // 非推荐的 OC：隐藏
-                card.classList.add('oc-hidden-card');
-                card.style.border = '';
-                card.style.boxShadow = '';
-                card.style.opacity = '';
+            
+        // 防止并发执行
+        if (recommendationExecuting) {
+            console.log('[OCSort] 推荐算法正在执行中，跳过本次调用');
+            return;
+        }
+            
+        recommendationExecuting = true;
+        lastRecommendationExecution = now;
+            
+        try {
+            // 执行推荐算法
+            const recommendations = executeRecommendation(5);
+                
+            if (recommendations.length === 0) {
+                return;
             }
-        });
+                
+            // 为推荐的 OC 添加标记，隐藏非推荐的 OC
+            const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
+            cards.forEach(card => {
+                const ocId = card.dataset.ocId;
+                const rec = recommendations.find(r => r.ocId === ocId);
+                    
+                if (rec) {
+                    // 显示的 OC：移除隐藏类
+                    card.classList.remove('oc-hidden-card');
+                        
+                    // 添加高亮边框
+                    card.style.border = '3px solid #ffd700';
+                    card.style.boxShadow = '0 0 15px rgba(255, 215, 0, 0.6)';
+                    card.style.opacity = '1';
+                        
+                    // 添加推荐语徽章
+                    const scenario = card.querySelector('[class*="scenario___"]');
+                    if (scenario && !scenario.querySelector('.oc-recommend-badge')) {
+                        const badge = document.createElement('div');
+                        badge.className = 'oc-recommend-badge';
+                        badge.textContent = `🌟 ${rec.reason}`;
+                        badge.title = `推荐分数: ${rec.recommendScore}\n推荐岗位: ${rec.recommendedPosition}`;
+                            
+                        Object.assign(badge.style, {
+                            position: 'absolute',
+                            top: '-10px',
+                            left: '10px',
+                            zIndex: '10',
+                            padding: '5px 12px',
+                            background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                            color: '#fff',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                            whiteSpace: 'nowrap'
+                        });
+                            
+                        scenario.style.position = 'relative';
+                        scenario.appendChild(badge);
+                    }
+                } else {
+                    // 非推荐的 OC：隐藏
+                    card.classList.add('oc-hidden-card');
+                    card.style.border = '';
+                    card.style.boxShadow = '';
+                    card.style.opacity = '';
+                }
+            });
+        } finally {
+            // 释放执行锁
+            recommendationExecuting = false;
+        }
     }
 
     // --- 遍历应用 (已修改) ---
