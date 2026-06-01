@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OC优化和推荐
-// @version      1.0
-// @description  优化 Torn 派系犯罪卡片的显示效果，并增加多级排序、筛选和简化开关，增加大锅饭总工分显示，增加
+// @version      2.0
+// @description  优化 Torn 派系犯罪卡片的显示效果，并增加多级排序、筛选和简化开关，增加大锅饭总工分显示，集成智能推荐系统（基于当前成功率和系数配置）
 // @author       zmpress [3633431]
 // @match        https://www.torn.com/factions.php?step=your*
 // @grant        GM_xmlhttpRequest
@@ -18,18 +18,22 @@
     const LS_KEY_API_KEY = 'z_tornMinimalKey'; // Torn API Key
     const LS_KEY_USER_FACTION = 'z_api2_userFaction'; // 用户帮派信息缓存
     const LS_KEY_FACTION_ID = 'oc_faction_id'; // 帮派ID（手动设置，备用）
-    
+    const LS_KEY_RECOMMEND_MODE = 'oc_recommend_mode'; // 推荐模式开关
+
     // 默认值为 'true'。只有当 localStorage 明确存为 'false' 时才为 false。
     const simplifyEnabled = localStorage.getItem(LS_KEY_SIMPLIFY) !== 'false';
-    
+
     // 获取当前工分类型，默认为总工分
     let scoreType = localStorage.getItem(LS_KEY_SCORE_TYPE) || 'total';
-    
+
     // 获取 API Key
     const apiKey = localStorage.getItem(LS_KEY_API_KEY);
-    
+
     // 获取当前用户的帮派ID，优先从 API 缓存获取，其次从手动设置获取
     let currentFactionId = '20465'; // 默认值
+
+    // 推荐模式状态
+    let recommendMode = localStorage.getItem(LS_KEY_RECOMMEND_MODE) === 'true';
 
     // 原有的功能开关（保留，以防你需要手动关闭）
     const isShowInfluence = true;
@@ -40,12 +44,12 @@
     // 缓存配置（z_daguofan_weight），10分钟过期
     const CACHE_KEY = 'z_daguofan_weight';
     const CACHE_EXPIRATION = 10 * 60 * 1000; // 10分钟
-    
+
     // CDN基础URL模板
     const CDN_BASE_URL = 'https://cdn.jsdelivr.net/gh/zmpress/game-script-center@main/torn-city/src/main/resources/config/dahuofan-weight/';
 
     let XISHU_TABLE = {};
-    
+
     /**
      * 从缓存获取数据
      */
@@ -56,12 +60,12 @@
                 console.log('[OCSort] 缓存不存在:', key);
                 return null;
             }
-            
+
             const data = JSON.parse(cached);
             const now = Date.now();
             const age = now - data.timestamp;
             const ageMinutes = Math.floor(age / 60000);
-            
+
             if (age < CACHE_EXPIRATION) {
                 console.log(`[OCSort] 缓存命中: ${key} (已缓存 ${ageMinutes} 分钟)`);
                 return data.content;
@@ -75,7 +79,7 @@
             return null;
         }
     }
-    
+
     /**
      * 保存数据到缓存
      */
@@ -92,17 +96,17 @@
             console.error('[OCSort] 保存缓存失败:', e);
         }
     }
-    
+
     /**
      * 从网络获取帮派系数配置（使用 GM_xmlhttpRequest 绕过 CSP）
      */
     async function fetchFactionCoefficient(factionId) {
         const url = CDN_BASE_URL + factionId + '.json';
-        
+
         return new Promise((resolve) => {
             try {
                 console.log('[OCSort] 正在从网络获取配置:', url);
-                
+
                 GM_xmlhttpRequest({
                     method: 'GET',
                     url: url,
@@ -136,7 +140,7 @@
             }
         });
     }
-    
+
     /**
      * 从 Torn API 获取用户帮派信息
      */
@@ -145,13 +149,13 @@
             console.log('[OCSort] 未设置 API Key，跳过 API 调用');
             return null;
         }
-        
+
         const url = `https://api.torn.com/v2/user/faction?key=${apiKey}`;
-        
+
         return new Promise((resolve) => {
             try {
                 console.log('[OCSort] 正在从 Torn API 获取帮派信息...');
-                
+
                 GM_xmlhttpRequest({
                     method: 'GET',
                     url: url,
@@ -190,7 +194,7 @@
             }
         });
     }
-    
+
     /**
      * 初始化帮派 ID（优先从 API 获取，其次从缓存获取）
      */
@@ -202,7 +206,7 @@
             console.log('[OCSort] 使用缓存的帮派 ID:', currentFactionId);
             return;
         }
-        
+
         // 如果缓存没有，尝试从 API 获取
         if (apiKey) {
             const factionInfo = await fetchUserFactionFromAPI();
@@ -214,7 +218,7 @@
                 return;
             }
         }
-        
+
         // 如果都没有，尝试使用手动设置的帮派 ID
         const manualFactionId = localStorage.getItem(LS_KEY_FACTION_ID);
         if (manualFactionId) {
@@ -224,27 +228,27 @@
             console.log('[OCSort] 使用默认帮派 ID:', currentFactionId);
         }
     }
-    
+
     /**
      * 加载系数表（优先从网络获取，失败则刷新缓存时间）
      */
     async function loadXishuTable() {
         // 先初始化帮派 ID
         await initFactionId();
-        
+
         try {
             // 先从缓存获取
             const cached = getCachedData(CACHE_KEY + '_' + currentFactionId);
-            
+
             // 尝试从网络获取当前帮派的配置
             let coefficientData = await fetchFactionCoefficient(currentFactionId);
-            
+
             // 如果获取失败且不是默认帮派，则尝试获取默认配置
             if (!coefficientData && currentFactionId !== '20465') {
                 console.log('[OCSort] 当前帮派配置获取失败，尝试使用默认配置(20465)');
                 coefficientData = await fetchFactionCoefficient('20465');
             }
-            
+
             // 如果网络获取成功，保存到缓存并使用
             if (coefficientData && isValidXishuTable(coefficientData)) {
                 XISHU_TABLE = coefficientData;
@@ -252,7 +256,7 @@
                 console.log('[OCSort] 从网络获取配置成功，已更新缓存');
                 return;
             }
-            
+
             // 如果网络获取失败，但有缓存，刷新缓存时间并继续使用
             if (cached && isValidXishuTable(cached)) {
                 XISHU_TABLE = cached;
@@ -261,7 +265,7 @@
                 console.log('[OCSort] 网络获取失败，已刷新缓存时间，继续使用缓存的系数表');
                 return;
             }
-            
+
             // 如果都没有，初始化为空对象
             console.warn('[OCSort] 无法获取系数表，请检查网络连接或帮派ID');
             XISHU_TABLE = {};
@@ -373,29 +377,29 @@
         const s = Number(value).toFixed(3);
         return s.replace(/\.?0+$/, "");
     }
-    
+
     /**
      * 获取用户在当前卡片中已占的岗位信息
      */
     function getUserOccupiedSlots(card) {
         const occupiedSlots = [];
         const notOpening = card.querySelector('[class*="notOpening___"]');
-        
+
         if (!notOpening) return occupiedSlots;
-        
+
         // 遍历所有岗位，找到用户已占的（非空缺）岗位
         Array.from(notOpening.children).forEach((child, index) => {
             const isVacant = child.querySelector('[class*="joinButton___"]') ||
                 child.querySelector('[class*="joinContainer___"]') ||
                 hasClassPrefix(child, "waitingJoin");
-            
+
             // 如果不是空缺，说明已被占用
             if (!isVacant) {
                 const jobNameEl = child.querySelector('[class*="title___"]');
                 const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
                 const chanceEl = child.querySelector('[class*="successChance___"]');
                 const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
-                
+
                 occupiedSlots.push({
                     index: index,
                     jobName: jobName,
@@ -404,10 +408,10 @@
                 });
             }
         });
-        
+
         return occupiedSlots;
     }
-    
+
     /**
      * 计算工分时考虑用户已占岗位（支持总工分和每日工分）
      */
@@ -415,10 +419,10 @@
         if (matchResult.reason !== "ok" || !Number.isFinite(matchResult.a)) {
             return { score: -1, displayValue: '', userCoefficient: null };
         }
-            
+
         const coefficient = matchResult.a;
         let totalProfit;
-            
+
         // 根据工分类型计算
         if (scoreType === 'daily') {
             // 每日工分：只计算单日收益，不乘以空缺天数
@@ -428,7 +432,7 @@
             if (userOccupiedSlots.length > 0 && vacantCount > 0) {
                 // 检查是否有与当前岗位相同名称的已占岗位
                 const hasSameJobOccupied = userOccupiedSlots.some(slot => slot.jobName === currentJobName);
-                    
+
                 if (hasSameJobOccupied) {
                     // 如果有相同的已占岗位，计算时需要考虑那一天
                     // 总工分 = 系数 × (空缺数 + 已占的同类型岗位数)
@@ -443,7 +447,7 @@
                 totalProfit = coefficient * vacantCount;
             }
         }
-            
+
         return {
             score: totalProfit,
             displayValue: formatProfitValue(totalProfit),
@@ -538,6 +542,16 @@
         font-weight: bold;
         color: #fff;
         font-variant-numeric: tabular-nums;
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
       }
     `;
 
@@ -634,6 +648,38 @@
         // 将工分类型切换按钮插入到简化按钮之后
         simplifyBtn.parentNode.insertBefore(scoreTypeToggleBtn, simplifyBtn.nextSibling);
 
+        // --- 大锅饭推荐按钮 ---
+        const recommendBtn = document.createElement('button');
+        recommendBtn.id = 'oc-toggle-recommend';
+        recommendBtn.className = 'oc-btn';
+        if (recommendMode) {
+            recommendBtn.textContent = '🌟 关闭推荐';
+            recommendBtn.classList.add('active');
+        } else {
+            recommendBtn.textContent = '🌟 大锅饭推荐';
+        }
+        recommendBtn.addEventListener('click', () => {
+            recommendMode = !recommendMode;
+            localStorage.setItem(LS_KEY_RECOMMEND_MODE, recommendMode);
+
+            if (recommendMode) {
+                recommendBtn.textContent = '🌟 关闭推荐';
+                recommendBtn.classList.add('active');
+                showNotification('已开启推荐模式，正在分析最佳 OC...');
+            } else {
+                recommendBtn.textContent = '🌟 大锅饭推荐';
+                recommendBtn.classList.remove('active');
+                showNotification('已关闭推荐模式');
+            }
+
+            // 重新应用显示
+            applyOverlays();
+            applyRecommendDisplay();
+        });
+
+        // 将推荐按钮插入到工分类型按钮之后
+        scoreTypeToggleBtn.parentNode.insertBefore(recommendBtn, scoreTypeToggleBtn.nextSibling);
+
         // --- API Key 设置逻辑 ---
         const apiKeyInput = filterBar.querySelector('#oc-api-key-input');
         const setApiKeyBtn = filterBar.querySelector('#oc-set-api-key-btn');
@@ -690,7 +736,7 @@
                     }
                 });
             });
-            
+
             // 回车键也可以提交
             apiKeyInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -1039,7 +1085,7 @@
                 hasClassPrefix(child, "waitingJoin");
             if (isVacant) vacantCount++;
         });
-        
+
         // 获取用户已占的岗位信息
         const userOccupiedSlots = getUserOccupiedSlots(card);
 
@@ -1095,12 +1141,12 @@
                     totalProfit = scoreData.score;
                     displayValue = scoreData.displayValue;
                     userCoefficient = scoreData.userCoefficient;
-                
+
                     // 更新卡片最大分数（只有真正匹配到系数才更新）
                     if (totalProfit > 0) {
                         cardMaxScore = Math.max(cardMaxScore, totalProfit);
                     }
-                
+
                     // 根据全局最高分设置颜色
                     if (globalMaxScore > 0 && totalProfit === globalMaxScore) {
                         // 最高分：绿色
@@ -1131,7 +1177,7 @@
                 const badge = document.createElement('div');
                 badge.className = 'oc-corner-index';
                 badge.textContent = displayValue;
-                
+
                 // 如果有用户系数信息，添加提示
                 if (userCoefficient !== null && userOccupiedSlots.length > 0) {
                     badge.title = `当前岗位系数: ${userCoefficient}\n您已占用 ${userOccupiedSlots.length} 个岗位`;
@@ -1280,12 +1326,12 @@
         if (timerSrc && !card._ocObserver) { // 使用一个观察者
             let lastUpdate = 0;
             const updateInterval = 1000; // 最多每秒更新一次
-            
+
             card._ocObserver = new MutationObserver(() => {
                 const now = Date.now();
                 if (now - lastUpdate < updateInterval) return; // 防抖：限制更新频率
                 lastUpdate = now;
-                
+
                 const newTimeText = timerSrc.textContent.trim();
                 const currentStatus = getStatus(card);
 
@@ -1353,6 +1399,838 @@
         return end.toLocaleString('zh-CN', options).replace(/\//g, '/');
     }
 
+    // ==================== 推荐算法集成 ====================
+
+    /**
+     * 显示通知消息（几秒后自动消失）
+     */
+    function showNotification(message, duration = 3000) {
+        // 移除旧的通知
+        const oldNotification = document.getElementById('oc-notification');
+        if (oldNotification) {
+            oldNotification.remove();
+        }
+
+        // 创建新通知
+        const notification = document.createElement('div');
+        notification.id = 'oc-notification';
+        notification.textContent = message;
+        Object.assign(notification.style, {
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: '10000',
+            padding: '15px 25px',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: '#fff',
+            borderRadius: '8px',
+            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            maxWidth: '400px',
+            animation: 'slideIn 0.3s ease-out'
+        });
+
+        document.body.appendChild(notification);
+
+        // 自动消失
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.style.opacity = '0';
+                notification.style.transition = 'opacity 0.3s';
+                setTimeout(() => notification.remove(), 300);
+            }
+        }, duration);
+    }
+
+    /**
+     * 解析 OC 等级
+     */
+    function parseOcLevel(card) {
+        const levelVal = card.querySelector('span[class^="levelValue"]');
+        return levelVal ? parseIntSafe(levelVal.textContent) : NaN;
+    }
+
+    /**
+     * 获取 OC 名称
+     */
+    function getOcName(card) {
+        const titleEl = card.querySelector('[class*="panelTitle___"]');
+        return titleEl ? titleEl.textContent.trim() : 'Unknown';
+    }
+
+    /**
+     * 获取用户当前成功率数据（从页面实时提取）
+     */
+    function getUserOcData() {
+        const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
+        const userOcData = [];
+
+        cards.forEach(card => {
+            const ocName = getOcName(card);
+            const ocLevel = parseOcLevel(card);
+            const notOpening = card.querySelector('[class*="notOpening___"]');
+
+            if (!notOpening) return;
+
+            // 遍历所有岗位，提取用户已占岗位的成功率
+            Array.from(notOpening.children).forEach(child => {
+                const isVacant = child.querySelector('[class*="joinButton___"]') ||
+                    child.querySelector('[class*="joinContainer___"]') ||
+                    hasClassPrefix(child, "waitingJoin");
+
+                // 如果不是空缺，说明是用户已占岗位
+                if (!isVacant) {
+                    const jobNameEl = child.querySelector('[class*="title___"]');
+                    const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
+                    const chanceEl = child.querySelector('[class*="successChance___"]');
+                    const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
+
+                    if (Number.isFinite(chance)) {
+                        userOcData.push({
+                            ocName: ocName,
+                            rank: ocLevel,
+                            position: jobName,
+                            passRate: chance
+                        });
+                    }
+                }
+            });
+        });
+
+        console.log('[OCSort] 提取到用户当前成功率数据:', userOcData.length, '条');
+        console.log('[OCSort] 详细数据:', userOcData.map(d => `${d.ocName}(Lv.${d.rank})-${d.position}=${d.passRate}%`).join(', '));
+        return userOcData;
+    }
+
+    /**
+     * 获取招募中的 OC 列表
+     */
+    function getRecruitOcList() {
+        const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
+        const recruitList = [];
+
+        cards.forEach(card => {
+            const ocId = card.dataset.ocId;
+            const ocName = getOcName(card);
+            const ocLevel = parseOcLevel(card);
+
+            // 检查是否是招募状态
+            const status = getStatus(card);
+            if (status === 'recruiting' || status === 'active') {
+                recruitList.push({
+                    id: ocId,
+                    name: ocName,
+                    rank: ocLevel,
+                    readyTime: null, // TODO: 从页面提取准备时间
+                    factionId: parseInt(currentFactionId)
+                });
+            }
+        });
+
+        return recruitList;
+    }
+
+    /**
+     * 获取空闲岗位列表
+     */
+    function getEmptySlotList() {
+        const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
+        const emptySlots = [];
+
+        cards.forEach(card => {
+            const ocId = card.dataset.ocId;
+            const notOpening = card.querySelector('[class*="notOpening___"]');
+
+            if (!notOpening) return;
+
+            Array.from(notOpening.children).forEach((child, index) => {
+                const isVacant = child.querySelector('[class*="joinButton___"]') ||
+                    child.querySelector('[class*="joinContainer___"]') ||
+                    hasClassPrefix(child, "waitingJoin");
+
+                if (isVacant) {
+                    const jobNameEl = child.querySelector('[class*="title___"]');
+                    const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
+                    const chanceEl = child.querySelector('[class*="successChance___"]');
+                    const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
+
+                    emptySlots.push({
+                        ocId: ocId,
+                        position: jobName,
+                        slotCode: jobName, // TODO: 需要映射到标准岗位代码
+                        passRate: chance
+                    });
+                }
+            });
+        });
+
+        return emptySlots;
+    }
+
+    /**
+     * 查找招募中的 OC 列表
+     */
+    function findRecruitList(factionId, recruitOcList, joinedOc) {
+        // 跑了进度的，只能判断当前队，可以换位置
+        if (joinedOc && joinedOc.slot && joinedOc.slot.progress > 0) {
+            return [joinedOc.oc];
+        }
+
+        if (!joinedOc) {
+            return recruitOcList;
+        }
+
+        // 针对于空转进度的，按照进度跑完时间减一天去计算
+        const joinedOcItem = joinedOc.oc;
+        let calcOc = recruitOcList.find(o => o.id === joinedOcItem.id);
+
+        if (calcOc) {
+            calcOc = { ...calcOc };
+            calcOc.readyTime = subtractDays(calcOc.readyTime, 1);
+            const index = recruitOcList.findIndex(o => o.id === calcOc.id);
+            recruitOcList = [...recruitOcList.slice(0, index), calcOc, ...recruitOcList.slice(index + 1)];
+        } else {
+            const modifiedOc = { ...joinedOcItem };
+            modifiedOc.readyTime = subtractDays(modifiedOc.readyTime, 1);
+            recruitOcList = [...recruitOcList, modifiedOc];
+        }
+
+        return recruitOcList;
+    }
+
+    /**
+     * 查找招募中的 OC 空位
+     */
+    function findEmptySlotList(recruitOcList, emptySlotList, joinedOc) {
+        const recruitOcIds = new Set(recruitOcList.map(oc => oc.id));
+        const filtered = emptySlotList.filter(slot => recruitOcIds.has(slot.ocId));
+
+        if (joinedOc && joinedOc.slot) {
+            filtered.push(joinedOc.slot);
+        }
+
+        return filtered;
+    }
+
+    /**
+     * 检测是否大锅饭推荐（只要配置了 OC 系数就是大锅饭模式）
+     */
+    function checkIsReassignRecommended(user, userOcData) {
+        // 检查是否有系数配置
+        const hasCoefficientConfig = Object.keys(XISHU_TABLE).length > 0;
+
+        if (!hasCoefficientConfig) {
+            console.log('[OCSort] 未配置 OC 系数，使用普通模式');
+            return false;
+        }
+
+        console.log('[OCSort] 检测到 OC 系数配置，使用大锅饭模式');
+        return true;
+    }
+
+    /**
+     * 查询对应的 OC 岗位配置（基于系数表）
+     */
+    function findSlotSetting(factionId, oc, slot) {
+        // 1. 检查帮派是否禁用整个 OC
+        if (isOcDisabled(factionId, oc)) {
+            return null;
+        }
+
+        // 检查系数表中是否有该 OC 的配置
+        const nameKey = normalizeOcName(oc.name);
+        const roleKey = normalizeRole(slot.position);
+        const levelKey = String(oc.rank);
+
+        const byOc = XISHU_TABLE[nameKey];
+        if (!byOc) {
+            return null; // 没有系数配置
+        }
+
+        const byLevel = byOc[levelKey];
+        if (!byLevel) {
+            return null; // 没有该等级的配置
+        }
+
+        const ranges = byLevel[roleKey];
+        if (!Array.isArray(ranges) || ranges.length === 0) {
+            return null; // 没有该岗位的配置
+        }
+
+        // 从系数表中提取 passRate 范围的最小值作为要求
+        let minPassRate = Infinity;
+        for (const r of ranges) {
+            if (!Array.isArray(r) || r.length < 3) continue;
+            const min = parseFloatSafe(r[0]);
+            if (Number.isFinite(min)) {
+                minPassRate = Math.min(minPassRate, min);
+            }
+        }
+
+        // 如果没有找到有效的最小值，使用默认值 70
+        if (!Number.isFinite(minPassRate) || minPassRate === Infinity) {
+            minPassRate = 70;
+        }
+
+        return {
+            ocName: oc.name,
+            rank: oc.rank,
+            slotCode: slot.position,
+            slotShortCode: slot.position,
+            passRate: minPassRate,
+            priority: 15 // 默认优先级
+        };
+    }
+
+    /**
+     * 查询对应的用户岗位成功率（使用当前页面数据）
+     */
+    function findUserPassRate(userOcData, oc, slotSetting) {
+        if (!slotSetting) {
+            console.log(`[OCSort] findUserPassRate: slotSetting 为空`);
+            return null;
+        }
+
+        // 从用户当前已占岗位中查找匹配的
+        const matched = userOcData.find(data => {
+            const nameMatch = data.ocName === oc.name;
+            const rankMatch = data.rank === oc.rank;
+            const posMatch = data.position === slotSetting.slotCode;
+
+            if (nameMatch && rankMatch && posMatch) {
+                console.log(`[OCSort] ✓ 找到用户数据: OC="${data.ocName}", 等级=${data.rank}, 岗位="${data.position}", 成功率=${data.passRate}`);
+            }
+
+            return nameMatch && rankMatch && posMatch;
+        });
+
+        if (!matched) {
+            console.log(`[OCSort] ✗ 未找到用户数据: OC="${oc.name}", 等级=${oc.rank}, 岗位="${slotSetting.slotCode}"`);
+            console.log(`[OCSort] 用户当前数据:`, userOcData.map(d => `${d.ocName}(Lv.${d.rank})-${d.position}=${d.passRate}`).join(', '));
+        }
+
+        return matched || null;
+    }
+
+    /**
+     * 计算推荐度评分（使用空闲岗位的成功率）
+     */
+    function calcRecommendScoreWithSlotPassRate(isReassign, oc, slotSetting, slotPassRate) {
+        if (isReassign) {
+            return calcReassignRecommendScoreWithSlot(oc, slotSetting, slotPassRate);
+        } else {
+            return calcNormalRecommendScoreWithSlot(oc, slotSetting, slotPassRate);
+        }
+    }
+
+    /**
+     * 计算普通模式推荐度评分（使用空闲岗位成功率）
+     */
+    function calcNormalRecommendScoreWithSlot(oc, slotSetting, slotPassRate) {
+        const passRateScore = calcPassRateScoreFromValue(slotSetting, slotPassRate);
+        const priorityScore = calcPriorityScore(slotSetting);
+        const rankScore = 10 * oc.rank;
+        const positionScore = passRateScore * priorityScore * 0.1 + rankScore;
+
+        const timeScore = calculateTimeScore(new Date());
+        return positionScore * 0.8 + timeScore * 0.2;
+    }
+
+    /**
+     * 计算大锅饭模式推荐度评分（使用空闲岗位成功率）
+     */
+    function calcReassignRecommendScoreWithSlot(oc, slotSetting, slotPassRate) {
+        // 1. 停转时间评分
+        const timeScore = calculateTimeScore(oc.readyTime);
+
+        // 2. 岗位评分，根据系数、成功率和岗位权重
+        const coefficient = getCoefficient(oc, slotSetting.slotCode, slotPassRate);
+
+        // 如果系数为 0，说明没有配置或匹配失败，不应该推荐
+        if (coefficient === 0) {
+            console.log(`[OCSort] OC "${oc.name}" 岗位 "${slotSetting.slotCode}" 系数为 0，跳过推荐`);
+            return 0;
+        }
+
+        const passRateScore = calcPassRateScoreFromValue(slotSetting, slotPassRate);
+        const priorityScore = calcPriorityScore(slotSetting);
+        const positionScore = coefficient * 4 + passRateScore * priorityScore * 0.1 + oc.rank;
+
+        // 3. 加权计算：时间80% + 成功率20%
+        const finalScore = parseFloat((timeScore * 0.8 + positionScore * 0.2).toFixed(2));
+
+        console.log(`[OCSort] OC "${oc.name}" 岗位 "${slotSetting.slotCode}" 推荐分数: ${finalScore} (系数: ${coefficient}, 时间分: ${timeScore}, 岗位分: ${positionScore})`);
+
+        return finalScore;
+    }
+
+    /**
+     * 从成功率值计算得分（不依赖 userPassRate 对象）
+     */
+    function calcPassRateScoreFromValue(slotSetting, passRate) {
+        const ability = passRate - slotSetting.passRate;
+        if (ability >= 10) {
+            return 10;
+        } else if (ability >= 5) {
+            return 8;
+        } else {
+            return 1;
+        }
+    }
+
+    /**
+     * 计算推荐度评分（保留旧接口，但不再使用）
+     */
+    function calcRecommendScore(isReassign, oc, slotSetting, userPassRate) {
+        if (isReassign) {
+            return calcReassignRecommendScore(oc, slotSetting, userPassRate);
+        } else {
+            return calcNormalRecommendScore(oc, slotSetting, userPassRate);
+        }
+    }
+
+    /**
+     * 计算普通模式推荐度评分
+     */
+    function calcNormalRecommendScore(oc, slotSetting, userPassRate) {
+        const passRateScore = calcPassRateScore(slotSetting, userPassRate);
+        const priorityScore = calcPriorityScore(slotSetting);
+        const rankScore = 10 * oc.rank;
+        const positionScore = passRateScore * priorityScore * 0.1 + rankScore;
+
+        const timeScore = calculateTimeScore(new Date());
+        return positionScore * 0.8 + timeScore * 0.2;
+    }
+
+    /**
+     * 计算大锅饭模式推荐度评分
+     */
+    function calcReassignRecommendScore(oc, slotSetting, userPassRate) {
+        // 1. 停转时间评分
+        const timeScore = calculateTimeScore(oc.readyTime);
+
+        // 2. 岗位评分，根据系数、成功率和岗位权重
+        const coefficient = getCoefficient(oc, slotSetting.slotCode, userPassRate.passRate);
+
+        // 如果系数为 0，说明没有配置或匹配失败，不应该推荐
+        if (coefficient === 0) {
+            console.log(`[OCSort] OC "${oc.name}" 岗位 "${slotSetting.slotCode}" 系数为 0，跳过推荐`);
+            return 0;
+        }
+
+        const passRateScore = calcPassRateScore(slotSetting, userPassRate);
+        const priorityScore = calcPriorityScore(slotSetting);
+        const positionScore = coefficient * 4 + passRateScore * priorityScore * 0.1 + oc.rank;
+
+        // 3. 加权计算：时间80% + 成功率20%
+        const finalScore = parseFloat((timeScore * 0.8 + positionScore * 0.2).toFixed(2));
+
+        console.log(`[OCSort] OC "${oc.name}" 岗位 "${slotSetting.slotCode}" 推荐分数: ${finalScore} (系数: ${coefficient}, 时间分: ${timeScore}, 岗位分: ${positionScore})`);
+
+        return finalScore;
+    }
+
+    /**
+     * 构建推荐理由
+     */
+    function buildRecommendReason(dateTime, passRate) {
+        const reasons = [];
+
+        // 停转时间
+        if (dateTime) {
+            const now = new Date();
+            const readyTime = new Date(dateTime);
+            const hours = now <= readyTime ?
+                Math.ceil((readyTime - now) / (1000 * 60 * 60)) : 0;
+
+            if (hours <= 0) {
+                reasons.push("已停转，急需加入");
+            } else {
+                reasons.push(`${hours}小时内停转`);
+            }
+        } else {
+            reasons.push("新队");
+        }
+
+        // 成功率
+        if (passRate >= 75) {
+            reasons.push("超高成功率");
+        } else if (passRate >= 70) {
+            reasons.push("高成功率");
+        } else {
+            reasons.push("成功率达标");
+        }
+
+        return reasons.join("、");
+    }
+
+    /**
+     * 计算时间评分
+     */
+    function calculateTimeScore(readyTime) {
+        if (!readyTime) {
+            // 新队99分，优先级次于2小时后停转队
+            return 95;
+        }
+
+        const now = new Date();
+        const ready = new Date(readyTime);
+        const hoursUntilReady = now <= ready ?
+            Math.ceil((ready - now) / (1000 * 60 * 60)) : 0;
+
+        // 已经停转 - 最高优先级
+        if (hoursUntilReady <= 0) {
+            return 100;
+        }
+        // 6小时内 - 极高优先级
+        if (hoursUntilReady <= 6) {
+            return Math.max(100 - hoursUntilReady * 2, 95);
+        }
+        // 24小时内 - 高优先级，加速递减
+        if (hoursUntilReady <= 24) {
+            return Math.max(95 - (hoursUntilReady - 6) * 1.67, 65);
+        }
+        // 48小时内 - 中等优先级
+        if (hoursUntilReady <= 48) {
+            return Math.max(65 - (hoursUntilReady - 24) * 1.25, 35);
+        }
+        // 72小时内 - 低优先级
+        if (hoursUntilReady <= 72) {
+            return Math.max(35 - (hoursUntilReady - 48) * 0.5, 20);
+        }
+        // 72小时以上 - 极低优先级
+        return Math.max(20 - (hoursUntilReady - 72) * 0.2, 10);
+    }
+
+    /**
+     * 计算成功率得分
+     */
+    function calcPassRateScore(slotSetting, userPassRate) {
+        const ability = userPassRate.passRate - slotSetting.passRate;
+        if (ability >= 10) {
+            return 10;
+        } else if (ability >= 5) {
+            return 8;
+        } else {
+            return 1;
+        }
+    }
+
+    /**
+     * 计算权重得分
+     */
+    function calcPriorityScore(slotSetting) {
+        if (slotSetting.priority >= 25) {
+            return 5;
+        } else if (slotSetting.priority >= 20) {
+            return 4;
+        } else if (slotSetting.priority >= 15) {
+            return 3;
+        } else if (slotSetting.priority >= 10) {
+            return 2;
+        } else {
+            return 1;
+        }
+    }
+
+    /**
+     * 获取日期减去天数的新日期
+     */
+    function subtractDays(date, days) {
+        const result = new Date(date);
+        result.setDate(result.getDate() - days);
+        return result;
+    }
+
+    /**
+     * 获取轮换 OC 名称列表（根据帮派ID）
+     */
+    function getRotationOcNames(factionId) {
+        const ROTATION_OC_NAME = {
+            20465: ["Ace in the Hole", "Stacking the Deck", "Break the Bank",
+                "Clinical Precision", "Blast from the Past", "Window of Opportunity"],
+            2095: ["Break the Bank", "Clinical Precision", "Blast from the Past",
+                "Window of Opportunity"],
+            27902: ["Break the Bank", "Clinical Precision", "Blast from the Past",
+                "Window of Opportunity"]
+            // ... 其他帮派
+        };
+        return ROTATION_OC_NAME[factionId] || [];
+    }
+
+    /**
+     * 获取启用大锅饭模式的帮派列表
+     */
+    function getReassignFactions() {
+        return [20465, 2095, 27902, 36134, 16335, 11796]; // PN, HP, CCRC, SH, NOV, BSU
+    }
+
+    /**
+     * 检查 OC 是否被帮派禁用
+     */
+    function isOcDisabled(factionId, oc) {
+        // TODO: 根据实际情况实现
+        return false;
+    }
+
+    /**
+     * 获取所有岗位配置
+     */
+    function getAllSlotSettings() {
+        // TODO: 从数据库或配置中获取
+        // 这里需要从 CDN 加载配置
+        const cached = getCachedData('z_slot_settings_' + currentFactionId);
+        return cached || [];
+    }
+
+    /**
+     * 获取帮派岗位覆盖配置
+     */
+    function getFactionSlotOverride(factionId, oc, position) {
+        // TODO: 根据实际情况实现
+        return null;
+    }
+
+    /**
+     * 获取工时系数
+     */
+    function getCoefficient(oc, position, passRate) {
+        // 使用已有的 XISHU_TABLE
+        const nameKey = normalizeOcName(oc.name);
+        const roleKey = normalizeRole(position);
+        const levelKey = String(oc.rank);
+
+        console.log(`[OCSort] 查找系数: OC="${oc.name}"(${nameKey}), 等级=${levelKey}, 岗位="${position}"(${roleKey}), 成功率=${passRate}`);
+
+        const byOc = XISHU_TABLE[nameKey];
+        if (!byOc) {
+            console.log(`[OCSort] ✗ 未找到 OC "${nameKey}" 的配置`);
+            return 0;
+        }
+
+        const byLevel = byOc[levelKey];
+        if (!byLevel) {
+            console.log(`[OCSort] ✗ 未找到等级 ${levelKey} 的配置`);
+            return 0;
+        }
+
+        const ranges = byLevel[roleKey];
+        if (!Array.isArray(ranges) || ranges.length === 0) {
+            console.log(`[OCSort] ✗ 未找到岗位 "${roleKey}" 的配置`);
+            return 0;
+        }
+
+        console.log(`[OCSort] 找到 ${ranges.length} 个区间配置:`, ranges);
+
+        for (const r of ranges) {
+            if (!Array.isArray(r) || r.length < 3) continue;
+            const min = parseFloatSafe(r[0]);
+            const max = parseFloatSafe(r[1]);
+            const a = parseFloatSafe(r[2]);
+            if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(a)) continue;
+
+            // 左开右闭区间 (min, max]: passRate > min && passRate <= max
+            const inRange = passRate > min && passRate <= max;
+            console.log(`[OCSort] 检查区间 (${min}, ${max}] -> 系数=${a}, 成功率${passRate}${inRange ? '✓ 匹配' : '✗ 不匹配'}`);
+
+            if (inRange) {
+                console.log(`[OCSort] ✓ 匹配成功，返回系数: ${a}`);
+                return a;
+            }
+        }
+
+        console.log(`[OCSort] ✗ 所有区间都不匹配，返回系数 0`);
+        return 0;
+    }
+
+    /**
+     * 执行推荐算法
+     */
+    function executeRecommendation(topN = 5) {
+        const user = {
+            factionId: parseInt(currentFactionId)
+        };
+
+        // 从页面实时提取用户当前成功率数据
+        const userOcData = getUserOcData();
+        const recruitOcList = getRecruitOcList();
+        const emptySlotList = getEmptySlotList();
+        const joinedOc = null; // TODO: 获取用户当前加入的 OC
+
+        // 1. 查询所有招募中的 OC
+        const finalRecruitList = findRecruitList(user.factionId, recruitOcList, joinedOc);
+        if (!finalRecruitList || finalRecruitList.length === 0) {
+            showNotification('没有找到招募中的 OC');
+            return [];
+        }
+
+        // 2. 查询所有未满员的 OC
+        const finalEmptySlots = findEmptySlotList(finalRecruitList, emptySlotList, joinedOc);
+        if (!finalEmptySlots || finalEmptySlots.length === 0) {
+            showNotification('没有空闲岗位');
+            return [];
+        }
+
+        // 3. 检查是否有系数配置（大锅饭模式）
+        const isReassign = checkIsReassignRecommended(user, userOcData);
+        if (!isReassign) {
+            showNotification('未检测到 OC 系数配置，请先加载系数表');
+            return [];
+        }
+
+        console.log('[OCSort] 使用大锅饭推荐模式，用户当前岗位数:', userOcData.length);
+
+        // 4. 为每个 OC 的每个空闲岗位计算推荐度
+        const recommendations = [];
+
+        for (const oc of finalRecruitList) {
+            // 大锅饭制度的，只判断轮换 OC
+            if (isReassign && !getRotationOcNames(user.factionId).includes(oc.name)) {
+                continue;
+            }
+
+            // 查询当前 OC 下所有空闲岗位
+            const vacantSlots = finalEmptySlots.filter(s => s.ocId === oc.id);
+
+            // 尝试匹配每个空闲岗位
+            for (const slot of vacantSlots) {
+                const slotSetting = findSlotSetting(user.factionId, oc, slot);
+
+                if (!slotSetting) {
+                    console.log(`[OCSort] ✗ 未找到岗位配置: OC="${oc.name}", 岗位="${slot.position}"`);
+                    continue;
+                }
+
+                // 使用空闲岗位的成功率（从页面提取的 vacancy 数据）
+                const slotPassRate = slot.passRate;
+
+                if (!Number.isFinite(slotPassRate)) {
+                    console.log(`[OCSort] ✗ 岗位成功率无效: OC="${oc.name}", 岗位="${slot.position}", 成功率=${slotPassRate}`);
+                    continue;
+                }
+
+                // 检查是否达标（使用空闲岗位的成功率）
+                if (slotPassRate < slotSetting.passRate) {
+                    console.log(`[OCSort] ✗ 成功率不达标: OC="${oc.name}", 岗位="${slot.position}", 当前=${slotPassRate}%, 要求=${slotSetting.passRate}%`);
+                    continue;
+                }
+
+                console.log(`[OCSort] ✓ 岗位匹配成功: OC="${oc.name}", 岗位="${slot.position}", 成功率=${slotPassRate}%`);
+
+                // 计算推荐度评分（使用空闲岗位的成功率）
+                const recommendScore = calcRecommendScoreWithSlotPassRate(isReassign, oc, slotSetting, slotPassRate);
+
+                // 过滤掉 0 分或负分的推荐（系数为 0 的已经被过滤）
+                if (recommendScore <= 0) {
+                    console.log(`[OCSort] OC "${oc.name}" 岗位 "${slot.position}" 分数 ${recommendScore} <= 0，跳过`);
+                    continue;
+                }
+
+                const recommendReason = buildRecommendReason(oc.readyTime, slotPassRate);
+
+                recommendations.push({
+                    ocId: oc.id,
+                    ocName: oc.name,
+                    rank: oc.rank,
+                    recommendedPosition: slot.position,
+                    recommendScore: recommendScore,
+                    readyTime: oc.readyTime,
+                    reason: recommendReason
+                });
+            }
+        }
+
+        // 5. 按推荐度排序，返回 Top N
+        const sorted = recommendations
+            .sort((a, b) => b.recommendScore - a.recommendScore)
+            .slice(0, topN);
+
+        if (sorted.length === 0) {
+            showNotification('没有找到推荐的 OC，可能已经是最佳配置或没有符合条件的 OC');
+        } else {
+            showNotification(`找到 ${sorted.length} 个推荐 OC，已高亮显示`);
+        }
+
+        return sorted;
+    }
+
+    /**
+     * 应用推荐结果显示
+     */
+    function applyRecommendDisplay() {
+        if (!recommendMode) {
+            // 清除所有推荐标记，显示所有卡片
+            document.querySelectorAll('[data-oc-id]').forEach(card => {
+                card.classList.remove('oc-hidden-card');
+                card.style.border = '';
+                card.style.boxShadow = '';
+                card.style.opacity = '';
+                // 移除推荐语
+                const recBadge = card.querySelector('.oc-recommend-badge');
+                if (recBadge) recBadge.remove();
+            });
+            return;
+        }
+
+        // 执行推荐算法
+        const recommendations = executeRecommendation(5);
+
+        if (recommendations.length === 0) {
+            return;
+        }
+
+        // 为推荐的 OC 添加标记，隐藏非推荐的 OC
+        const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
+        cards.forEach(card => {
+            const ocId = card.dataset.ocId;
+            const rec = recommendations.find(r => r.ocId === ocId);
+
+            if (rec) {
+                // 显示的 OC：移除隐藏类
+                card.classList.remove('oc-hidden-card');
+
+                // 添加高亮边框
+                card.style.border = '3px solid #ffd700';
+                card.style.boxShadow = '0 0 15px rgba(255, 215, 0, 0.6)';
+                card.style.opacity = '1';
+
+                // 添加推荐语徽章
+                const scenario = card.querySelector('[class*="scenario___"]');
+                if (scenario && !scenario.querySelector('.oc-recommend-badge')) {
+                    const badge = document.createElement('div');
+                    badge.className = 'oc-recommend-badge';
+                    badge.textContent = `🌟 ${rec.reason}`;
+                    badge.title = `推荐分数: ${rec.recommendScore}\n推荐岗位: ${rec.recommendedPosition}`;
+
+                    Object.assign(badge.style, {
+                        position: 'absolute',
+                        top: '-10px',
+                        left: '10px',
+                        zIndex: '10',
+                        padding: '5px 12px',
+                        background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                        color: '#fff',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                        whiteSpace: 'nowrap'
+                    });
+
+                    scenario.style.position = 'relative';
+                    scenario.appendChild(badge);
+                }
+            } else {
+                // 非推荐的 OC：隐藏
+                card.classList.add('oc-hidden-card');
+                card.style.border = '';
+                card.style.boxShadow = '';
+                card.style.opacity = '';
+            }
+        });
+    }
+
     // --- 遍历应用 (已修改) ---
     function applyOverlays() {
         const cards = document.querySelectorAll('[data-oc-id]');
@@ -1379,6 +2257,11 @@
                 }
             }
         });
+
+        // 如果开启了推荐模式，应用推荐显示
+        if (recommendMode) {
+            applyRecommendDisplay();
+        }
     }
 
 
