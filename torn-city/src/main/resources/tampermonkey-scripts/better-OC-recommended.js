@@ -19,9 +19,13 @@
     const LS_KEY_USER_FACTION = 'z_api2_userFaction'; // 用户帮派信息缓存
     const LS_KEY_FACTION_ID = 'oc_faction_id'; // 帮派ID（手动设置，备用）
     const LS_KEY_RECOMMEND_MODE = 'oc_recommend_mode'; // 推荐模式开关
+    const LS_KEY_SHOW_OTHERS_SCORE = 'oc_show_others_score'; // 显示其他人工分开关
 
     // 默认值为 'true'。只有当 localStorage 明确存为 'false' 时才为 false。
     const simplifyEnabled = localStorage.getItem(LS_KEY_SIMPLIFY) !== 'false';
+    
+    // 显示其他人工分开关（默认为 false，隐藏其他人工分）
+    const showOthersScore = localStorage.getItem(LS_KEY_SHOW_OTHERS_SCORE) === 'true';
 
     // 固定使用每日工分
     const scoreType = 'daily';
@@ -658,6 +662,29 @@
             window.location.reload();
         });
 
+        // --- 显示其他人工分开关 ---
+        const showOthersScoreBtn = document.createElement('button');
+        showOthersScoreBtn.id = 'oc-toggle-others-score';
+        showOthersScoreBtn.className = 'oc-btn';
+        if (showOthersScore) {
+            showOthersScoreBtn.textContent = '隐藏其他人工分';
+            showOthersScoreBtn.classList.add('active');
+        } else {
+            showOthersScoreBtn.textContent = '显示其他人工分';
+        }
+        showOthersScoreBtn.addEventListener('click', () => {
+            const newState = !showOthersScore;
+            localStorage.setItem(LS_KEY_SHOW_OTHERS_SCORE, newState);
+            // 清除表单提交状态，然后重新加载当前页面
+            if (window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.href);
+            }
+            window.location.reload();
+        });
+
+        // 将显示其他人工分按钮插入到简化按钮之后
+        simplifyBtn.parentNode.insertBefore(showOthersScoreBtn, simplifyBtn.nextSibling);
+
         // --- 大锅饭推荐按钮 ---
         const recommendBtn = document.createElement('button');
         recommendBtn.id = 'oc-toggle-recommend';
@@ -723,8 +750,8 @@
             applyRecommendDisplay();
         });
 
-        // 将推荐按钮插入到简化按钮之后
-        simplifyBtn.parentNode.insertBefore(recommendBtn, simplifyBtn.nextSibling);
+        // 将推荐按钮插入到显示其他人工分按钮之后
+        showOthersScoreBtn.parentNode.insertBefore(recommendBtn, showOthersScoreBtn.nextSibling);
 
         // --- API Key 设置逻辑 ---
         const apiKeyInput = filterBar.querySelector('#oc-api-key-input');
@@ -1160,10 +1187,15 @@
             }
 
             // 只显示空缺岗位和当前用户已占岗位的工分
-            // 其他人占用的岗位不显示工分
+            // 其他人占用的岗位根据设置决定是否显示
             if (!isVacant && !isCurrentUserSlot) {
-                child.querySelectorAll('.oc-corner-index').forEach(n => n.remove());
-                return;
+                if (showOthersScore) {
+                    // 如果开启了显示其他人工分，继续处理
+                } else {
+                    // 隐藏其他人工分，直接返回
+                    child.querySelectorAll('.oc-corner-index').forEach(n => n.remove());
+                    return;
+                }
             }
 
             // 使用 daguofan 的系数表计算工分
@@ -1230,6 +1262,8 @@
                         badge.title = `当前岗位系数: ${userCoefficient}\n您已占用此岗位`;
                     } else if (isVacant) {
                         badge.title = `当前岗位系数: ${userCoefficient}\n空缺岗位`;
+                    } else if (showOthersScore) {
+                        badge.title = `当前岗位系数: ${userCoefficient}\n其他人占用`;
                     }
                 }
 
@@ -1243,9 +1277,9 @@
                     fontSize: '12px',
                     fontWeight: '700',
                     color: '#000', // 黑色字体
-                    background: bgColor,
-                    borderRadius: '999px',
-                    boxShadow: `0 0 0 2px ${bgColor}`, // 边框颜色与背景色一致
+                    background: isVacant || isCurrentUserSlot ? bgColor : '#ffffff', // 空缺和自己用计算的颜色，其他人用白色
+                    borderRadius: isVacant || isCurrentUserSlot ? '999px' : '4px', // 空缺和自己用圆形，其他人用方形
+                    boxShadow: `0 0 0 2px ${isVacant || isCurrentUserSlot ? bgColor : '#ffffff'}`, // 边框颜色与背景色一致
                     pointerEvents: 'none',
                     userSelect: 'none',
                 });
