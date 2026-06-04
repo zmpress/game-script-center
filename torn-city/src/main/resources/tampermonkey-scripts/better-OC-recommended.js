@@ -967,6 +967,10 @@
 
     // --- 应用排序和筛选的函数 ---
     function applyFiltersAndSorting() {
+        // 防止无限循环：执行期间暂时断开监听
+        if (appearObserver) appearObserver.disconnect();
+        if (removalObserver) removalObserver.disconnect();
+        
         const allCards = Array.from(document.querySelectorAll('[data-oc-id]'));
         if (allCards.length === 0) return;
 
@@ -2454,6 +2458,10 @@
 
     // --- 遍历应用 (已修改) ---
     function applyOverlays() {
+        // 防止无限循环：执行期间暂时断开监听
+        if (appearObserver) appearObserver.disconnect();
+        if (removalObserver) removalObserver.disconnect();
+        
         const cards = document.querySelectorAll('[data-oc-id]');
         cards.forEach((c, index) => {
 
@@ -2482,6 +2490,13 @@
         // 如果开启了推荐模式，应用推荐显示
         if (recommendMode) {
             applyRecommendDisplay();
+        }
+        
+        // 所有操作完成后，恢复监听
+        if (currentListElement && document.body.contains(currentListElement)) {
+            watchCrimesListRemoval(currentListElement, () => applyOverlays());
+        } else {
+            startWatchingForCrimesList(() => applyOverlays());
         }
     }
 
