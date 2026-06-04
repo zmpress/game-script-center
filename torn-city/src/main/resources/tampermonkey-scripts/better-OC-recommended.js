@@ -15,7 +15,6 @@
 
     // --- 新增：本地存储和开关状态 ---
     const LS_KEY_SIMPLIFY = 'oc_simplify_display';
-    const LS_KEY_SCORE_TYPE = 'oc_score_type'; // 工分类型开关 ('total' 或 'daily')
     const LS_KEY_API_KEY = 'z_tornMinimalKey'; // Torn API Key
     const LS_KEY_USER_FACTION = 'z_api2_userFaction'; // 用户帮派信息缓存
     const LS_KEY_FACTION_ID = 'oc_faction_id'; // 帮派ID（手动设置，备用）
@@ -24,8 +23,8 @@
     // 默认值为 'true'。只有当 localStorage 明确存为 'false' 时才为 false。
     const simplifyEnabled = localStorage.getItem(LS_KEY_SIMPLIFY) !== 'false';
 
-    // 获取当前工分类型，默认为总工分
-    let scoreType = localStorage.getItem(LS_KEY_SCORE_TYPE) || 'total';
+    // 固定使用每日工分
+    const scoreType = 'daily';
 
     // 获取 API Key
     const apiKey = localStorage.getItem(LS_KEY_API_KEY);
@@ -37,10 +36,19 @@
     // 注意：这里强制设置为 false，不读取 localStorage，确保每次打开页面都是关闭状态
     let recommendMode = false;
     
+    // 当前用户信息
+    let currentUserId = null;
+    let currentUserName = '';
+    
     // 推荐显示相关变量
     let lastRecommendationExecution = 0; // 上次推荐执行时间
-    const RECOMMEND_DEBOUNCE_TIME = 1000; // 1秒防抖延迟
+    const RECOMMEND_DEBOUNCE_TIME = 5000; // 5秒防抖延迟（防止标签切换频繁触发）
     let recommendationExecuting = false; // 防止并发执行
+    let currentRecommendations = []; // 缓存当前推荐结果
+    let isTabSwitching = false; // 标记是否正在切换标签
+    let tabSwitchTimeout = null; // 标签切换定时器
+    let lastActiveTab = null; // 记录上次激活的标签
+    let xishuTableLoaded = false; // 标记系数表是否已加载完成
 
     // 原有的功能开关（保留，以防你需要手动关闭）
     const isShowInfluence = true;
@@ -200,6 +208,35 @@
                 resolve(null);
             }
         });
+    }
+
+    /**
+     * 从页面获取当前用户信息
+     */
+    function getCurrentUserInfo() {
+        // 尝试从页面中获取用户信息
+        const menuInfoRow = document.querySelector('.menu-info-row___nRClV');
+        if (menuInfoRow) {
+            const nameLink = menuInfoRow.querySelector('a.menu-value___vn8gN');
+            if (nameLink) {
+                const href = nameLink.getAttribute('href');
+                const match = href ? href.match(/XID=(\d+)/) : null;
+                if (match) {
+                    currentUserId = match[1];
+                    currentUserName = nameLink.textContent.trim();
+                    console.log('[OCSort] 获取到当前用户信息:', currentUserName, '(ID:', currentUserId + ')');
+                    return;
+                }
+            }
+        }
+        
+        // 如果页面中没有找到，尝试从 localStorage 获取
+        const playerId = localStorage.getItem('sessionTokenOwner') || localStorage.getItem('PlayerId');
+        if (playerId) {
+            currentUserId = playerId;
+            currentUserName = 'Unknown';
+            console.log('[OCSort] 从 localStorage 获取到用户 ID:', currentUserId);
+        }
     }
 
     /**
@@ -394,25 +431,34 @@
 
         if (!notOpening) return occupiedSlots;
 
-        // 遍历所有岗位，找到用户已占的（非空缺）岗位
+        // 遍历所有岗位，找到当前用户已占的岗位
         Array.from(notOpening.children).forEach((child, index) => {
             const isVacant = child.querySelector('[class*="joinButton___"]') ||
                 child.querySelector('[class*="joinContainer___"]') ||
                 hasClassPrefix(child, "waitingJoin");
 
-            // 如果不是空缺，说明已被占用
+            // 如果不是空缺，检查是否是当前用户占用
             if (!isVacant) {
-                const jobNameEl = child.querySelector('[class*="title___"]');
-                const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
-                const chanceEl = child.querySelector('[class*="successChance___"]');
-                const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
+                // 查找用户名元素
+                const userNameEl = child.querySelector('.textName___X5wiu');
+                if (userNameEl) {
+                    const userName = userNameEl.textContent.trim();
+                    // 如果用户名匹配当前用户，说明是当前用户占用的岗位
+                    if (userName === currentUserName && currentUserName) {
+                        const jobNameEl = child.querySelector('[class*="title___"]');
+                        const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
+                        const chanceEl = child.querySelector('[class*="successChance___"]');
+                        const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
 
-                occupiedSlots.push({
-                    index: index,
-                    jobName: jobName,
-                    chance: chance,
-                    element: child
-                });
+                        occupiedSlots.push({
+                            index: index,
+                            jobName: jobName,
+                            chance: chance,
+                            element: child
+                        });
+                        console.log(`[OCSort] 发现用户已占岗位: ${jobName} (${userName})`);
+                    }
+                }
             }
         });
 
@@ -420,7 +466,7 @@
     }
 
     /**
-     * 计算工分时考虑用户已占岗位（支持总工分和每日工分）
+     * 计算工分时考虑用户已占岗位（固定使用每日工分）
      */
     function calculateScoreWithUserSlot(matchResult, vacantCount, userOccupiedSlots, currentJobName) {
         if (matchResult.reason !== "ok" || !Number.isFinite(matchResult.a)) {
@@ -428,32 +474,8 @@
         }
 
         const coefficient = matchResult.a;
-        let totalProfit;
-
-        // 根据工分类型计算
-        if (scoreType === 'daily') {
-            // 每日工分：只计算单日收益，不乘以空缺天数
-            totalProfit = coefficient;
-        } else {
-            // 总工分：系数 × 空缺岗位数
-            if (userOccupiedSlots.length > 0 && vacantCount > 0) {
-                // 检查是否有与当前岗位相同名称的已占岗位
-                const hasSameJobOccupied = userOccupiedSlots.some(slot => slot.jobName === currentJobName);
-
-                if (hasSameJobOccupied) {
-                    // 如果有相同的已占岗位，计算时需要考虑那一天
-                    // 总工分 = 系数 × (空缺数 + 已占的同类型岗位数)
-                    const sameJobCount = userOccupiedSlots.filter(slot => slot.jobName === currentJobName).length;
-                    totalProfit = coefficient * (vacantCount + sameJobCount);
-                } else {
-                    // 没有相同类型的已占岗位，正常计算
-                    totalProfit = coefficient * vacantCount;
-                }
-            } else {
-                // 正常情况，显示总工分（系数 × 空缺岗位数）
-                totalProfit = coefficient * vacantCount;
-            }
-        }
+        // 固定使用每日工分：只计算单日收益，不乘以空缺天数
+        const totalProfit = coefficient;
 
         return {
             score: totalProfit,
@@ -465,7 +487,11 @@
     // 初始化加载系数表（异步，优先从网络获取）
     loadXishuTable().then(() => {
         console.log('[OCSort] 系数表初始化完成');
+        xishuTableLoaded = true; // 标记为已加载
     });
+
+    // 获取当前用户信息
+    getCurrentUserInfo();
 
     // --- 注入CSS样式 ---
     function injectStyles() {
@@ -632,29 +658,6 @@
             window.location.reload();
         });
 
-        // --- 工分类型切换逻辑 ---
-        const scoreTypeToggleBtn = document.createElement('button');
-        scoreTypeToggleBtn.id = 'oc-toggle-score-type';
-        scoreTypeToggleBtn.className = 'oc-btn';
-        if (scoreType === 'daily') {
-            scoreTypeToggleBtn.textContent = '切换到总工分';
-            scoreTypeToggleBtn.classList.add('active');
-        } else {
-            scoreTypeToggleBtn.textContent = '切换到每日工分';
-        }
-        scoreTypeToggleBtn.addEventListener('click', () => {
-            const newScoreType = scoreType === 'total' ? 'daily' : 'total';
-            localStorage.setItem(LS_KEY_SCORE_TYPE, newScoreType);
-            // 清除表单提交状态，然后重新加载当前页面
-            if (window.history.replaceState) {
-                window.history.replaceState(null, '', window.location.href);
-            }
-            window.location.reload();
-        });
-
-        // 将工分类型切换按钮插入到简化按钮之后
-        simplifyBtn.parentNode.insertBefore(scoreTypeToggleBtn, simplifyBtn.nextSibling);
-
         // --- 大锅饭推荐按钮 ---
         const recommendBtn = document.createElement('button');
         recommendBtn.id = 'oc-toggle-recommend';
@@ -665,7 +668,39 @@
         } else {
             recommendBtn.textContent = '🌟 大锅饭推荐';
         }
-        recommendBtn.addEventListener('click', () => {
+        recommendBtn.addEventListener('click', async () => {
+            // 检查是否在 Recruiting 页签
+            const activeTab = document.querySelector('.buttonsContainer___yYIas .button___QqDaS.active___ILnLJ');
+            if (activeTab) {
+                const tabName = activeTab.querySelector('.tabName___Ri9Gx');
+                if (tabName && tabName.textContent.trim() !== 'Recruiting') {
+                    showNotification('⚠️ 请切换到"未完成 OC"（Recruiting）页签后再开启推荐', 3000);
+                    return;
+                }
+            }
+                    
+            // 如果系数表还未加载完成，等待加载
+            if (!xishuTableLoaded) {
+                showNotification('⏳ 正在加载系数表，请稍候...', 2000);
+                console.log('[OCSort] 系数表尚未加载完成，等待中...');
+                        
+                // 等待最多 5 秒
+                const maxWaitTime = 5000;
+                const startTime = Date.now();
+                        
+                while (!xishuTableLoaded && (Date.now() - startTime) < maxWaitTime) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                        
+                if (!xishuTableLoaded) {
+                    showNotification('❌ 系数表加载超时，请检查网络连接或刷新页面', 3000);
+                    console.error('[OCSort] 系数表加载超时');
+                    return;
+                }
+                        
+                console.log('[OCSort] 系数表加载完成，继续执行');
+            }
+                    
             recommendMode = !recommendMode;
             localStorage.setItem(LS_KEY_RECOMMEND_MODE, recommendMode);
 
@@ -679,13 +714,17 @@
                 showNotification('已关闭推荐模式');
             }
 
+            // 清空缓存，强制重新计算
+            currentRecommendations = [];
+            lastRecommendationExecution = 0;
+            
             // 重新应用显示
             applyOverlays();
             applyRecommendDisplay();
         });
 
-        // 将推荐按钮插入到工分类型按钮之后
-        scoreTypeToggleBtn.parentNode.insertBefore(recommendBtn, scoreTypeToggleBtn.nextSibling);
+        // 将推荐按钮插入到简化按钮之后
+        simplifyBtn.parentNode.insertBefore(recommendBtn, simplifyBtn.nextSibling);
 
         // --- API Key 设置逻辑 ---
         const apiKeyInput = filterBar.querySelector('#oc-api-key-input');
@@ -1015,29 +1054,28 @@
 
             if (!Number.isFinite(crimeLevel)) return;
 
-            // 统计空缺岗位数量
-            const allSlots = Array.from(notOpening.children);
-            let vacantCount = 0;
-            allSlots.forEach(child => {
-                const isVacant = child.querySelector('[class*="joinButton___"]') ||
-                    child.querySelector('[class*="joinContainer___"]') ||
-                    hasClassPrefix(child, "waitingJoin");
-                if (isVacant) vacantCount++;
-            });
-
-            if (vacantCount <= 0) return;
-
-            cardData.push({ crimeName, crimeLevel, vacantCount, notOpening });
+            cardData.push({ crimeName, crimeLevel, notOpening });
         });
 
-        // 批量计算分数
-        cardData.forEach(({ crimeName, crimeLevel, vacantCount, notOpening }) => {
+        // 批量计算分数 - 只计算空缺岗位和当前用户已占岗位
+        cardData.forEach(({ crimeName, crimeLevel, notOpening }) => {
             Array.from(notOpening.children).forEach((child) => {
                 const isVacant = child.querySelector('[class*="joinButton___"]') ||
                     child.querySelector('[class*="joinContainer___"]') ||
                     hasClassPrefix(child, "waitingJoin");
 
-                if (!isVacant) return;
+                // 检查这个岗位是否是当前用户占用的
+                const userNameEl = child.querySelector('.textName___X5wiu');
+                let isCurrentUserSlot = false;
+                if (userNameEl && currentUserName) {
+                    const userName = userNameEl.textContent.trim();
+                    isCurrentUserSlot = (userName === currentUserName);
+                }
+
+                // 只计算空缺岗位和当前用户已占岗位的分数
+                if (!isVacant && !isCurrentUserSlot) {
+                    return;
+                }
 
                 const jobNameEl = child.querySelector('[class*="title___"]');
                 const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
@@ -1047,16 +1085,9 @@
                 if (Number.isFinite(chance)) {
                     const matchResult = getXishuMatchResult(crimeName, crimeLevel, jobName, chance);
                     if (matchResult.reason === "ok" && Number.isFinite(matchResult.a)) {
-                        // 根据工分类型计算分数
-                        if (scoreType === 'daily') {
-                            // 每日工分：只计算单日收益，不乘以空缺天数
-                            const dailyProfit = matchResult.a;
-                            globalMaxScore = Math.max(globalMaxScore, dailyProfit);
-                        } else {
-                            // 总工分：系数 × 空缺岗位数
-                            const totalProfit = matchResult.a * vacantCount;
-                            globalMaxScore = Math.max(globalMaxScore, totalProfit);
-                        }
+                        // 固定使用每日工分：只计算单日收益
+                        const dailyProfit = matchResult.a;
+                        globalMaxScore = Math.max(globalMaxScore, dailyProfit);
                     }
                 }
             });
@@ -1111,12 +1142,6 @@
                 child.querySelector('[class*="joinContainer___"]') ||
                 hasClassPrefix(child, "waitingJoin");
 
-            // 如果不是空缺岗位，则不显示任何东西
-            if (!isVacant) {
-                child.querySelectorAll('.oc-corner-index').forEach(n => n.remove());
-                return;
-            }
-
             const cs = getComputedStyle(child);
             if (cs.position === 'static') child.style.position = 'relative';
             child.style.overflow = 'visible';
@@ -1125,6 +1150,21 @@
             const jobName = jobNameEl ? jobNameEl.textContent.trim() : 'Unknown';
             const chanceEl = child.querySelector('[class*="successChance___"]');
             const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
+
+            // 检查这个岗位是否是当前用户占用的
+            const userNameEl = child.querySelector('.textName___X5wiu');
+            let isCurrentUserSlot = false;
+            if (userNameEl && currentUserName) {
+                const userName = userNameEl.textContent.trim();
+                isCurrentUserSlot = (userName === currentUserName);
+            }
+
+            // 只显示空缺岗位和当前用户已占岗位的工分
+            // 其他人占用的岗位不显示工分
+            if (!isVacant && !isCurrentUserSlot) {
+                child.querySelectorAll('.oc-corner-index').forEach(n => n.remove());
+                return;
+            }
 
             // 使用 daguofan 的系数表计算工分
             let displayValue = '';
@@ -1178,16 +1218,19 @@
 
             child.querySelectorAll('.oc-corner-index').forEach(n => n.remove());
 
-            // 根据开关决定是否显示工分
-            const showScoreEnabled = true; // 工分始终显示
-            if (showScoreEnabled) {
+            // 显示工分：空缺岗位和当前用户已占岗位都显示
+            if (displayValue) {
                 const badge = document.createElement('div');
                 badge.className = 'oc-corner-index';
                 badge.textContent = displayValue;
 
-                // 如果有用户系数信息，添加提示
-                if (userCoefficient !== null && userOccupiedSlots.length > 0) {
-                    badge.title = `当前岗位系数: ${userCoefficient}\n您已占用 ${userOccupiedSlots.length} 个岗位`;
+                // 添加提示
+                if (userCoefficient !== null) {
+                    if (isCurrentUserSlot) {
+                        badge.title = `当前岗位系数: ${userCoefficient}\n您已占用此岗位`;
+                    } else if (isVacant) {
+                        badge.title = `当前岗位系数: ${userCoefficient}\n空缺岗位`;
+                    }
                 }
 
                 Object.assign(badge.style, {
@@ -2082,7 +2125,7 @@
         // 3. 检查是否有系数配置（大锅饭模式）
         const isReassign = checkIsReassignRecommended(user, userOcData);
         if (!isReassign) {
-            showNotification('未检测到 OC 系数配置，请先加载系数表');
+            showNotification('⚠️ 未检测到 OC 系数配置，请检查网络连接或刷新页面重试');
             return [];
         }
 
@@ -2177,6 +2220,13 @@
                 const recBadge = card.querySelector('.oc-recommend-badge');
                 if (recBadge) recBadge.remove();
             });
+            currentRecommendations = [];
+            return;
+        }
+            
+        // 如果正在切换标签，跳过本次执行
+        if (isTabSwitching) {
+            console.log('[OCSort] 检测到标签切换中，跳过推荐执行');
             return;
         }
             
@@ -2192,6 +2242,19 @@
             console.log('[OCSort] 推荐算法正在执行中，跳过本次调用');
             return;
         }
+        
+        // 检查系数表是否已加载
+        if (!xishuTableLoaded) {
+            console.log('[OCSort] 系数表尚未加载完成，等待加载...');
+            showNotification('⏳ 系数表加载中，请稍候...', 2000);
+            return;
+        }
+
+        // 如果已经有缓存的推荐结果，直接使用，避免重复计算
+        if (currentRecommendations.length > 0) {
+            applyRecommendationToCards(currentRecommendations);
+            return;
+        }
             
         recommendationExecuting = true;
         lastRecommendationExecution = now;
@@ -2201,30 +2264,75 @@
             const recommendations = executeRecommendation(5);
                 
             if (recommendations.length === 0) {
+                currentRecommendations = [];
                 return;
             }
+
+            // 缓存推荐结果
+            currentRecommendations = recommendations;
                 
-            // 为推荐的 OC 添加标记，隐藏非推荐的 OC
-            const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
-            cards.forEach(card => {
-                const ocId = card.dataset.ocId;
-                const rec = recommendations.find(r => r.ocId === ocId);
+            applyRecommendationToCards(recommendations);
+        } catch (e) {
+            console.error('[OCSort] 推荐算法执行失败:', e);
+            currentRecommendations = [];
+        } finally {
+            // 释放执行锁
+            recommendationExecuting = false;
+        }
+    }
+
+    /**
+     * 将推荐结果应用到卡片上（优化版，避免闪烁）
+     */
+    function applyRecommendationToCards(recommendations) {
+        if (!recommendations || recommendations.length === 0) {
+            return;
+        }
+            
+        // 为推荐的 OC 添加标记，隐藏非推荐的 OC
+        const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
+        cards.forEach(card => {
+            const ocId = card.dataset.ocId;
+            const rec = recommendations.find(r => r.ocId === ocId);
+                
+            if (rec) {
+                // 显示的 OC：移除隐藏类
+                card.classList.remove('oc-hidden-card');
                     
-                if (rec) {
-                    // 显示的 OC：移除隐藏类
-                    card.classList.remove('oc-hidden-card');
-                        
-                    // 添加高亮边框
-                    card.style.border = '3px solid #ffd700';
-                    card.style.boxShadow = '0 0 15px rgba(255, 215, 0, 0.6)';
-                    card.style.opacity = '1';
-                        
-                    // 添加推荐语徽章
-                    const scenario = card.querySelector('[class*="scenario___"]');
-                    if (scenario && !scenario.querySelector('.oc-recommend-badge')) {
+                // 只在样式不同时才更新，避免闪烁
+                const newBorder = '3px solid #ffd700';
+                const newBoxShadow = '0 0 15px rgba(255, 215, 0, 0.6)';
+                const newOpacity = '1';
+                
+                if (card.style.border !== newBorder) {
+                    card.style.border = newBorder;
+                }
+                if (card.style.boxShadow !== newBoxShadow) {
+                    card.style.boxShadow = newBoxShadow;
+                }
+                if (card.style.opacity !== newOpacity) {
+                    card.style.opacity = newOpacity;
+                }
+                    
+                // 添加或更新推荐语徽章
+                const scenario = card.querySelector('[class*="scenario___"]');
+                if (scenario) {
+                    // 检查是否已有相同的徽章
+                    const existingBadge = scenario.querySelector('.oc-recommend-badge');
+                    const badgeText = `🌟 ${rec.reason}`;
+                    
+                    if (existingBadge && existingBadge.textContent === badgeText) {
+                        // 徽章内容相同，不需要更新
+                    } else {
+                        // 移除旧的徽章
+                        if (existingBadge) {
+                            existingBadge.remove();
+                        }
+
+                        // 创建新的徽章
                         const badge = document.createElement('div');
                         badge.className = 'oc-recommend-badge';
-                        badge.textContent = `🌟 ${rec.reason}`;
+                        badge.textContent = badgeText;
                         badge.title = `推荐分数: ${rec.recommendScore}\n推荐岗位: ${rec.recommendedPosition}`;
                             
                         Object.assign(badge.style, {
@@ -2245,18 +2353,62 @@
                         scenario.style.position = 'relative';
                         scenario.appendChild(badge);
                     }
-                } else {
-                    // 非推荐的 OC：隐藏
-                    card.classList.add('oc-hidden-card');
-                    card.style.border = '';
-                    card.style.boxShadow = '';
-                    card.style.opacity = '';
                 }
-            });
-        } finally {
-            // 释放执行锁
-            recommendationExecuting = false;
-        }
+            } else {
+                // 非推荐的 OC：隐藏
+                if (!card.classList.contains('oc-hidden-card')) {
+                    card.classList.add('oc-hidden-card');
+                }
+                // 清除样式
+                if (card.style.border) card.style.border = '';
+                if (card.style.boxShadow) card.style.boxShadow = '';
+                if (card.style.opacity) card.style.opacity = '';
+            }
+        });
+    }
+
+    /**
+     * 监听标签切换事件
+     */
+    function setupTabSwitchListener() {
+        const buttonsContainer = document.querySelector('.buttonsContainer___yYIas');
+        if (!buttonsContainer) return;
+        
+        // 使用事件委托监听按钮点击
+        buttonsContainer.addEventListener('click', (e) => {
+            const button = e.target.closest('.button___QqDaS');
+            if (!button) return;
+            
+            // 延迟检查，等待标签切换完成
+            setTimeout(() => {
+                const activeTab = document.querySelector('.buttonsContainer___yYIas .button___QqDaS.active___ILnLJ');
+                if (activeTab) {
+                    const tabName = activeTab.querySelector('.tabName___Ri9Gx');
+                    if (tabName) {
+                        const currentTab = tabName.textContent.trim();
+                        
+                        // 如果从 Recruiting 切换到其他标签，且推荐模式开启
+                        if (lastActiveTab === 'Recruiting' && currentTab !== 'Recruiting' && recommendMode) {
+                            console.log('[OCSort] 检测到从 Recruiting 切换到其他标签，暂停推荐');
+                            isTabSwitching = true;
+                            
+                            // 清除之前的定时器
+                            if (tabSwitchTimeout) {
+                                clearTimeout(tabSwitchTimeout);
+                            }
+                            
+                            // 设置较长的等待时间
+                            tabSwitchTimeout = setTimeout(() => {
+                                isTabSwitching = false;
+                                tabSwitchTimeout = null;
+                            }, 2000);
+                        }
+                        
+                        lastActiveTab = currentTab;
+                    }
+                }
+            }, 100);
+        });
     }
 
     // --- 遍历应用 (已修改) ---
@@ -2351,6 +2503,30 @@
         if (listContainer) {
             injectStyles(); // 始终注入 CSS (用于筛选栏)
             createFilterBar(listContainer); // 始终创建筛选栏 (包含开关)
+            setupTabSwitchListener(); // 设置标签切换监听
+        }
+
+        // 如果是推荐模式，重置状态以强制重新计算
+        if (recommendMode) {
+            // 清除之前的定时器
+            if (tabSwitchTimeout) {
+                clearTimeout(tabSwitchTimeout);
+            }
+            
+            // 设置标签切换标记，防止立即执行
+            isTabSwitching = true;
+            
+            // 延长等待时间到 1.5 秒，确保页面完全渲染
+            tabSwitchTimeout = setTimeout(() => {
+                isTabSwitching = false;
+                tabSwitchTimeout = null;
+                console.log('[OCSort] 标签切换完成，允许推荐执行');
+            }, 1500);
+            
+            // 清空缓存，强制重新计算
+            currentRecommendations = [];
+            // 重置防抖时间，给页面渲染留出足够时间
+            lastRecommendationExecution = Date.now() - RECOMMEND_DEBOUNCE_TIME + 2500;
         }
 
         callback(); // 执行原始的回调 (即 applyOverlays)
