@@ -492,6 +492,13 @@
     loadXishuTable().then(() => {
         console.log('[OCSort] 系数表初始化完成');
         xishuTableLoaded = true; // 标记为已加载
+        
+        // 系数表加载完成后，重新应用徽章（如果页面已经有卡片）
+        const existingCards = document.querySelectorAll('[data-oc-id]');
+        if (existingCards.length > 0) {
+            console.log('[OCSort] 检测到已有 OC 卡片，重新应用徽章');
+            applyOverlays();
+        }
     });
 
     // 获取当前用户信息
@@ -2563,7 +2570,28 @@
             lastRecommendationExecution = Date.now() - RECOMMEND_DEBOUNCE_TIME + 2500;
         }
 
-        callback(); // 执行原始的回调 (即 applyOverlays)
+        // 等待系数表加载完成后再执行回调
+        if (xishuTableLoaded) {
+            console.log('[OCSort] 系数表已加载，立即执行 applyOverlays');
+            callback(); // 执行原始的回调 (即 applyOverlays)
+        } else {
+            console.log('[OCSort] 系数表尚未加载，等待加载完成后执行');
+            // 等待最多 5 秒
+            const maxWaitTime = 5000;
+            const startTime = Date.now();
+            const checkInterval = setInterval(() => {
+                if (xishuTableLoaded || (Date.now() - startTime) > maxWaitTime) {
+                    clearInterval(checkInterval);
+                    if (xishuTableLoaded) {
+                        console.log('[OCSort] 系数表加载完成，执行 applyOverlays');
+                    } else {
+                        console.warn('[OCSort] 系数表加载超时，仍然执行 applyOverlays（可能没有徽章）');
+                    }
+                    callback(); // 执行原始的回调 (即 applyOverlays)
+                }
+            }, 100);
+        }
+        
         applyFiltersAndSorting(); // 始终应用排序和筛选
     }
 
