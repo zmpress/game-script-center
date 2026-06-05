@@ -288,7 +288,14 @@
             // 先从缓存获取
             const cached = getCachedData(CACHE_KEY + '_' + currentFactionId);
 
-            // 尝试从网络获取当前帮派的配置
+            // 如果缓存有效，直接使用缓存，不调接口
+            if (cached && isValidXishuTable(cached)) {
+                XISHU_TABLE = cached;
+                console.log('[OCSort] 使用缓存的系数表');
+                return;
+            }
+
+            // 缓存无效或已过期，尝试从网络获取当前帮派的配置
             let coefficientData = await fetchFactionCoefficient(currentFactionId);
 
             // 如果获取失败且不是默认帮派，则尝试获取默认配置
@@ -305,7 +312,7 @@
                 return;
             }
 
-            // 如果网络获取失败，但有缓存，刷新缓存时间并继续使用
+            // 如果网络获取失败，但有缓存（虽然可能已过期），刷新缓存时间并继续使用
             if (cached && isValidXishuTable(cached)) {
                 XISHU_TABLE = cached;
                 // 刷新缓存时间戳，延长有效期
@@ -337,14 +344,15 @@
     }
 
     function normalizeOcName(name) {
+        // 去除所有空格（包括中间空格）
         return String(name ?? "")
             .replace(/\u00A0/g, " ")
-            .replace(/\s+/g, " ")
+            .replace(/\s+/g, "")
             .trim();
     }
 
     function normalizeRole(role) {
-        // 去除所有空格
+        // 去除所有空格（包括中间空格）
         return String(role ?? "").replace(/\s+/g, "").trim();
     }
 
