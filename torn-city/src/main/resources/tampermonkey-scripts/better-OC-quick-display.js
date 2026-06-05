@@ -584,10 +584,9 @@
                 
                 // 计算剩余秒数用于颜色判断
                 const remainingSeconds = this.parseOCTimeToSeconds(ocTimeText);
-                if (remainingSeconds === 0) {
-                    timeSpan.style.color = '#4CAF50'; // 就绪显示绿色
-                } else if (remainingSeconds <= 300) {
-                    timeSpan.style.color = '#FF0000'; // 低于 5 分钟显示红色
+                const warningTime = 300; // OC 默认预警时间 5 分钟
+                if (warningTime && remainingSeconds <= warningTime) {
+                    timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
                 } else {
                     timeSpan.style.color = '#000'; // 默认黑色
                 }
@@ -688,13 +687,11 @@
                 itemDiv.dataset.cooldownKey = item.key; // 用于后续更新
                 itemDiv.style.cursor = 'pointer';
 
-                const timeText = seconds > 0 ? this.formatCooldownTime(seconds) : '就绪';
+                const timeText = seconds > 0 ? this.formatCooldownTime(seconds) : this.formatCooldownTime(0);
                 const warningTime = CONFIG.COOLDOWN_SETTINGS.WARNING_TIME[item.key.toUpperCase()];
                 let colorStyle = 'color: #000;'; // 默认黑色
 
-                if (seconds === 0) {
-                    colorStyle = 'color: #4CAF50;'; // 就绪显示绿色
-                } else if (warningTime && seconds <= warningTime) {
+                if (warningTime && seconds <= warningTime) {
                     colorStyle = 'color: #FF0000;'; // 低于预警时间显示红色
                 }
 
@@ -1148,8 +1145,6 @@
 
             // 每秒更新一次
             this.cooldownTimerId = setInterval(() => {
-                let allReady = true;
-
                 // 更新每个冷却项
                 container.querySelectorAll('[data-cooldown-key]').forEach(itemDiv => {
                     const key = itemDiv.dataset.cooldownKey;
@@ -1157,34 +1152,25 @@
 
                     if (remainingSeconds[key] > 0) {
                         remainingSeconds[key]--;
-                        allReady = false;
+                    }
 
-                        const timeText = this.formatCooldownTime(remainingSeconds[key]);
-                        timeSpan.textContent = timeText;
+                    const timeText = this.formatCooldownTime(remainingSeconds[key]);
+                    timeSpan.textContent = timeText;
 
-                        // 根据预警时间设置颜色
-                        const warningTime = CONFIG.COOLDOWN_SETTINGS.WARNING_TIME[key.toUpperCase()];
-                        if (warningTime && remainingSeconds[key] <= warningTime) {
-                            timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
-                        } else {
-                            timeSpan.style.color = '#000'; // 默认黑色
-                        }
+                    // 根据预警时间设置颜色
+                    const warningTime = CONFIG.COOLDOWN_SETTINGS.WARNING_TIME[key.toUpperCase()];
+                    if (warningTime && remainingSeconds[key] <= warningTime) {
+                        timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
                     } else {
-                        timeSpan.textContent = '就绪';
-                        timeSpan.style.color = '#4CAF50'; // 就绪显示绿色
+                        timeSpan.style.color = '#000'; // 默认黑色
                     }
                 });
-
-                // 如果所有冷却都就绪，停止定时器
-                if (allReady) {
-                    clearInterval(this.cooldownTimerId);
-                    this.cooldownTimerId = null;
-                }
             }, 1000);
         }
 
         formatCooldownTime(seconds) {
-            if (seconds <= 0) return '就绪';
+            // 确保最小为 0
+            if (seconds <= 0) return '0s';
 
             const days = Math.floor(seconds / 86400);
             const hours = Math.floor((seconds % 86400) / 3600);
@@ -1231,9 +1217,9 @@
             // 加上空槽位的时间：每个空槽位加 24 小时
             remainingSeconds += emptySlots * 24 * 3600;
 
-            // 如果时间小于等于 0，表示就绪
-            if (remainingSeconds <= 0) {
-                return '就绪';
+            // 确保最小为 0
+            if (remainingSeconds < 0) {
+                remainingSeconds = 0;
             }
 
             return this.formatCooldownTime(remainingSeconds);
@@ -1241,7 +1227,7 @@
 
         // 解析 OC 时间文本为秒数
         parseOCTimeToSeconds(timeText) {
-            if (timeText === '就绪') return 0;
+            if (timeText === '0s') return 0;
             if (timeText === '未开始' || timeText === '未知') return Number.MAX_SAFE_INTEGER;
 
             const daysMatch = timeText.match(/(\d+)d/);
