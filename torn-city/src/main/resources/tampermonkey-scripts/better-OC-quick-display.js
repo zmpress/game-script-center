@@ -27,6 +27,10 @@
             COOLDOWN_DURATION: 30,
             REFILLS_DURATION: 30
         },
+        OC_SETTINGS: {
+            SHOW_OC_TIME: true,
+            VISUALIZE_PROGRESS: true
+        },
         COOLDOWN_SETTINGS: {
             SHOW_ICONS: true,
             SHOW_DRUG: true,
@@ -55,6 +59,10 @@
             OC_DATA_DURATION: 30, // Organized Crime API 缓存时间，单位：秒 (默认 30 秒)
             COOLDOWN_DURATION: 30, // Cooldowns API 缓存时间，单位：秒 (默认 30 秒)
             REFILLS_DURATION: 30 // Refills API 缓存时间，单位：秒 (默认 30 秒)
+        },
+        OC_SETTINGS: { // OC 相关设置
+            SHOW_OC_TIME: true, // 显示 OC 剩余时间和进度
+            VISUALIZE_PROGRESS: true // 可视化 OC 进度（false 时用文字显示）
         },
         COOLDOWN_SETTINGS: { // true 打开 / false 关闭
             SHOW_ICONS: true, // 显示图标（false 时显示文字标签）
@@ -373,6 +381,7 @@
             try {
                 // 先重置为默认配置
                 Object.assign(CONFIG.CACHE, DEFAULT_CONFIG.CACHE);
+                Object.assign(CONFIG.OC_SETTINGS, DEFAULT_CONFIG.OC_SETTINGS);
                 Object.assign(CONFIG.COOLDOWN_SETTINGS, DEFAULT_CONFIG.COOLDOWN_SETTINGS);
                 CONFIG.COOLDOWN_SETTINGS.WARNING_TIME = JSON.parse(JSON.stringify(DEFAULT_CONFIG.COOLDOWN_SETTINGS.WARNING_TIME));
                 Object.assign(CONFIG.REFILLS_SETTINGS, DEFAULT_CONFIG.REFILLS_SETTINGS);
@@ -384,6 +393,9 @@
                     const config = JSON.parse(savedConfig);
                     if (config.CACHE) {
                         Object.assign(CONFIG.CACHE, config.CACHE);
+                    }
+                    if (config.OC_SETTINGS) {
+                        Object.assign(CONFIG.OC_SETTINGS, config.OC_SETTINGS);
                     }
                     if (config.COOLDOWN_SETTINGS) {
                         Object.assign(CONFIG.COOLDOWN_SETTINGS, config.COOLDOWN_SETTINGS);
@@ -425,19 +437,27 @@
                 }
             }
 
-            const response = await APIManager.getUserOCData();
+            // 如果开启了 OC 时间显示，才获取和显示 OC 数据
+            let userOC = null;
+            if (CONFIG.OC_SETTINGS.SHOW_OC_TIME) {
+                const response = await APIManager.getUserOCData();
 
-            // 如果发生 Api key 无效等错误，则渲染输入框重新输入
-            if (response && response.error) {
-                this.renderApiKeyInput(ocStatusContainer, response.message);
-                return;
+                // 如果发生 Api key 无效等错误，则渲染输入框重新输入
+                if (response && response.error) {
+                    this.renderApiKeyInput(ocStatusContainer, response.message);
+                    return;
+                }
+
+                userOC = response ? response.data : null;
             }
 
-            const userOC = response ? response.data : null;
+            // 创建一个 slotIcons 容器用于存放 OC 内容
+            const slotIcons = this.createSlotIconsContainer();
 
             if (userOC) {
                 const mappedCrime = {
                     id: userOC.id,
+                    ready_at: userOC.ready_at,
                     slots: userOC.slots.map(s => ({
                         user_id: s.user ? s.user.id : null,
                         user: s.user ? {
@@ -450,10 +470,18 @@
                         hasTool: function() { return this.item_requirement && this.item_requirement.is_available; }
                     }))
                 };
-                this.renderParticipatingStatus(ocStatusContainer, mappedCrime, CONFIG.USER_ID);
-            } else {
-                this.renderNonParticipatingStatus(ocStatusContainer);
+                this.renderParticipatingStatus(slotIcons, mappedCrime, CONFIG.USER_ID);
+            } else if (CONFIG.OC_SETTINGS.SHOW_OC_TIME) {
+                // 只有在开启 OC 显示时才显示"未加入oc"
+                this.renderNonParticipatingStatus(slotIcons);
             }
+            // 如果关闭了 OC 显示，slotIcons 会是空的，但会继续显示冷却时间
+            
+            // 将 slotIcons 添加到主容器
+            ocStatusContainer.appendChild(slotIcons);
+            
+            // 无论是否显示 OC，都显示其他冷却时间
+            await this.addCooldownDisplay(ocStatusContainer, slotIcons);
         }
 
         renderApiKeyInput(container, errorMsg = "") {
@@ -514,29 +542,60 @@
         }
 
         renderParticipatingStatus(container, userCrime, userId) {
-            const slotIcons = this.createSlotIconsContainer();
-
-            const sortedSlots = userCrime.slots.sort((a, b) => {
-                if (a.user_id && b.user_id) return a.user.joined_at - b.user.joined_at;
-                return a.user_id ? -1 : 1;
-            });
-
-            const fragment = document.createDocumentFragment();
-            sortedSlots.forEach((slot) => {
-                const SegmentedIconInfo = this.getSegmentedIconInfo(slot);
-                const icon = this.createSlotIcon(slot, SegmentedIconInfo, userId);
-                // 为每个图标单独添加点击跳转事件
-                icon.addEventListener('click', () => {
-                    window.location.href = `https://www.torn.com/factions.php?step=your#/tab=crimes`;
+            // 如果开启可视化，使用原有的进度条图形显示
+            if (CONFIG.OC_SETTINGS.VISUALIZE_PROGRESS) {
+                const sortedSlots = userCrime.slots.sort((a, b) => {
+                    if (a.user_id && b.user_id) return a.user.joined_at - b.user.joined_at;
+                    return a.user_id ? -1 : 1;
                 });
-                fragment.appendChild(icon);
-            });
-            slotIcons.appendChild(fragment);
 
-            // 添加冷却时间显示
-            this.addCooldownDisplay(container, slotIcons);
-
-            container.appendChild(slotIcons);
+                const fragment = document.createDocumentFragment();
+                sortedSlots.forEach((slot) => {
+                    const SegmentedIconInfo = this.getSegmentedIconInfo(slot);
+                    const icon = this.createSlotIcon(slot, SegmentedIconInfo, userId);
+                    // 为每个图标单独添加点击跳转事件
+                    icon.addEventListener('click', () => {
+                        window.location.href = `https://www.torn.com/factions.php?step=your#/tab=crimes`;
+                    });
+                    fragment.appendChild(icon);
+                });
+                container.appendChild(fragment);
+            } else {
+                // 如果关闭可视化，用文字显示 OC 冷却时间
+                const ocTimeText = this.calculateOCTimeText(userCrime);
+                const timeDiv = document.createElement('div');
+                timeDiv.style.display = 'flex';
+                timeDiv.style.alignItems = 'center';
+                timeDiv.style.gap = '3px';
+                timeDiv.style.fontSize = '11px';
+                timeDiv.style.color = '#666';
+                timeDiv.style.padding = '0'; // 确保没有padding
+                timeDiv.style.margin = '0'; // 确保没有margin
+                
+                const labelSpan = document.createElement('span');
+                labelSpan.textContent = 'OC:';
+                labelSpan.style.fontWeight = '500';
+                labelSpan.style.color = '#000';
+                
+                const timeSpan = document.createElement('span');
+                timeSpan.textContent = ocTimeText;
+                timeSpan.className = 'oc-cooldown-time';
+                timeSpan.style.fontWeight = '500';
+                
+                // 计算剩余秒数用于颜色判断
+                const remainingSeconds = this.parseOCTimeToSeconds(ocTimeText);
+                if (remainingSeconds === 0) {
+                    timeSpan.style.color = '#4CAF50'; // 就绪显示绿色
+                } else if (remainingSeconds <= 300) {
+                    timeSpan.style.color = '#FF0000'; // 低于 5 分钟显示红色
+                } else {
+                    timeSpan.style.color = '#000'; // 默认黑色
+                }
+                
+                timeDiv.appendChild(labelSpan);
+                timeDiv.appendChild(timeSpan);
+                container.appendChild(timeDiv);
+            }
         }
 
         async addCooldownDisplay(container, slotIcons) {
@@ -563,10 +622,19 @@
                 // 将冷却时间容器放在 slotIcons 的右侧
                 slotIcons.style.display = 'flex';
                 slotIcons.style.alignItems = 'center';
+                slotIcons.style.padding = '0'; // 手机端移除padding，避免额外空隙
+                
                 const wrapper = document.createElement('div');
                 wrapper.style.display = 'flex';
                 wrapper.style.alignItems = 'center';
-                wrapper.appendChild(slotIcons);
+                wrapper.style.padding = '0'; // 确保wrapper没有额外padding
+                wrapper.style.margin = '0'; // 确保wrapper没有额外margin
+                
+                // 只有当 slotIcons 有内容时才添加
+                if (slotIcons.children.length > 0) {
+                    wrapper.appendChild(slotIcons);
+                }
+                
                 wrapper.appendChild(cooldownContainer);
                 container.innerHTML = '';
                 container.appendChild(wrapper);
@@ -828,6 +896,9 @@
             // 缓存时间设置
             contentDiv.appendChild(this.createCacheSection());
 
+            // OC 显示设置
+            contentDiv.appendChild(this.createOCSettingsSection());
+
             // 冷却显示设置
             contentDiv.appendChild(this.createCooldownSection());
 
@@ -924,6 +995,21 @@
             section.appendChild(this.createNumberInput('OC 数据缓存', CONFIG.CACHE.OC_DATA_DURATION, (val) => { CONFIG.CACHE.OC_DATA_DURATION = parseInt(val) || 30; }));
             section.appendChild(this.createNumberInput('冷却时间缓存', CONFIG.CACHE.COOLDOWN_DURATION, (val) => { CONFIG.CACHE.COOLDOWN_DURATION = parseInt(val) || 30; }));
             section.appendChild(this.createNumberInput('Refills 缓存', CONFIG.CACHE.REFILLS_DURATION, (val) => { CONFIG.CACHE.REFILLS_DURATION = parseInt(val) || 30; }));
+
+            return section;
+        }
+
+        createOCSettingsSection() {
+            const section = document.createElement('div');
+            section.style.marginBottom = '20px';
+
+            const title = document.createElement('h4');
+            title.textContent = '🎭 OC 进度显示';
+            title.style.cssText = 'margin: 0 0 10px 0; font-size: 14px; color: #555;';
+            section.appendChild(title);
+
+            section.appendChild(this.createToggle('显示 OC 剩余时间', CONFIG.OC_SETTINGS.SHOW_OC_TIME, (v) => { CONFIG.OC_SETTINGS.SHOW_OC_TIME = v; }));
+            section.appendChild(this.createToggle('可视化 OC 进度（关闭则用文字显示）', CONFIG.OC_SETTINGS.VISUALIZE_PROGRESS, (v) => { CONFIG.OC_SETTINGS.VISUALIZE_PROGRESS = v; }));
 
             return section;
         }
@@ -1037,6 +1123,7 @@
             try {
                 const configToSave = {
                     CACHE: CONFIG.CACHE,
+                    OC_SETTINGS: CONFIG.OC_SETTINGS,
                     COOLDOWN_SETTINGS: CONFIG.COOLDOWN_SETTINGS,
                     REFILLS_SETTINGS: CONFIG.REFILLS_SETTINGS,
                     UI_SETTINGS: CONFIG.UI_SETTINGS
@@ -1115,6 +1202,59 @@
             }
         }
 
+        // 计算 OC 冷却时间文本（基于 ready_at 和空槽位数）
+        calculateOCTimeText(userCrime) {
+            if (!userCrime || !userCrime.slots || userCrime.slots.length === 0) {
+                return '未知';
+            }
+
+            const currentTime = Math.floor(Date.now() / 1000); // 当前时间戳（秒）
+            
+            // 计算空槽位数
+            let emptySlots = 0;
+            userCrime.slots.forEach(slot => {
+                if (!slot.user_id) {
+                    emptySlots++;
+                }
+            });
+
+            // 如果没有 ready_at，返回未知
+            if (!userCrime.ready_at) {
+                return '未知';
+            }
+
+            // 计算基础剩余时间：ready_at - 当前时间
+            let remainingSeconds = userCrime.ready_at - currentTime;
+
+            // 加上空槽位的时间：每个空槽位加 24 小时
+            remainingSeconds += emptySlots * 24 * 3600;
+
+            // 如果时间小于等于 0，表示就绪
+            if (remainingSeconds <= 0) {
+                return '就绪';
+            }
+
+            return this.formatCooldownTime(remainingSeconds);
+        }
+
+        // 解析 OC 时间文本为秒数
+        parseOCTimeToSeconds(timeText) {
+            if (timeText === '就绪') return 0;
+            if (timeText === '未开始' || timeText === '未知') return Number.MAX_SAFE_INTEGER;
+
+            const daysMatch = timeText.match(/(\d+)d/);
+            const hoursMatch = timeText.match(/(\d+)h/);
+            const minutesMatch = timeText.match(/(\d+)m/);
+            const secsMatch = timeText.match(/(\d+)s/);
+
+            const days = daysMatch ? parseInt(daysMatch[1]) : 0;
+            const hours = hoursMatch ? parseInt(hoursMatch[1]) : 0;
+            const minutes = minutesMatch ? parseInt(minutesMatch[1]) : 0;
+            const secs = secsMatch ? parseInt(secsMatch[1]) : 0;
+
+            return days * 86400 + hours * 3600 + minutes * 60 + secs;
+        }
+
         getSegmentedIconInfo(slot) {
             let SegmentedIconInfo = [];
             if (slot.user_id) {
@@ -1159,7 +1299,8 @@
 
             // 手机端可以适当减少背景的视觉占比或调整内边距
             container.style.background = 'transparent'; // 如果不需要背景底色，设为 transparent
-            container.style.padding = isMobile ? '1px 2px' : '1px 5px 1px 0px';
+            container.style.padding = isMobile ? '0' : '1px 5px 1px 0px'; // 手机端完全移除padding
+            container.style.margin = '0'; // 确保没有margin
             container.style.boxShadow = 'none'; // 如果有阴影也一并去掉
 
             container.addEventListener('mouseover', () => {
@@ -1445,13 +1586,14 @@
             container.style.display = 'flex';
             container.style.flexDirection = 'column';
             container.style.height = 'auto'; // 紧凑：移除原先固定的 32px
-            container.style.minHeight = '20px'; // 设定最小自适应高度
+            container.style.minHeight = 'auto'; // 手机端改为auto，避免多余空隙
             container.style.marginTop = '2px'; // 紧凑：从 10px 降到 2px
             container.id = 'oc-status-container';
 
             if (Utils.isMobileDevice()) {
                 container.style.margin = '2px 15px'; // 紧凑：移动端的 margin 也同步调小
                 container.style.width = 'calc(100% - 30px)';
+                container.style.padding = '0'; // 确保手机端没有padding
             }
 
             containerParent.appendChild(container);
@@ -1494,6 +1636,9 @@
                     const config = JSON.parse(savedConfig);
                     if (config.CACHE) {
                         Object.assign(CONFIG.CACHE, config.CACHE);
+                    }
+                    if (config.OC_SETTINGS) {
+                        Object.assign(CONFIG.OC_SETTINGS, config.OC_SETTINGS);
                     }
                     if (config.COOLDOWN_SETTINGS) {
                         Object.assign(CONFIG.COOLDOWN_SETTINGS, config.COOLDOWN_SETTINGS);
