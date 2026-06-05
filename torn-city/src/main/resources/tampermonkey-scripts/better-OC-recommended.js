@@ -21,11 +21,11 @@
     const LS_KEY_RECOMMEND_MODE = 'oc_recommend_mode'; // 推荐模式开关
     const LS_KEY_SHOW_OTHERS_SCORE = 'oc_show_others_score'; // 显示其他人工分开关
 
-    // 默认值为 'true'。只有当 localStorage 明确存为 'false' 时才为 false。
-    const simplifyEnabled = localStorage.getItem(LS_KEY_SIMPLIFY) !== 'false';
+    // 默认值为 'false'。只有当 localStorage 明确存为 'true' 时才为 true（原版显示）。
+    const simplifyEnabled = localStorage.getItem(LS_KEY_SIMPLIFY) === 'true';
     
-    // 显示其他人工分开关（默认为 false，隐藏其他人工分）
-    const showOthersScore = localStorage.getItem(LS_KEY_SHOW_OTHERS_SCORE) === 'true';
+    // 显示其他人工分开关（默认为 true，显示其他人工分）
+    const showOthersScore = localStorage.getItem(LS_KEY_SHOW_OTHERS_SCORE) !== 'false';
 
     // 固定使用每日工分
     const scoreType = 'daily';
