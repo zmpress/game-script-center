@@ -70,6 +70,8 @@ public class OCWeightUpdate {
 
         for (Map.Entry<String, List<TornSettingOcCoefficientDO>> ocEntry : groupedByOcName.entrySet()) {
             String ocName = ocEntry.getKey();
+            // 去除岗位名称中的所有空格
+            String processedOcName = ocName.replaceAll("\\s+", "");
             List<TornSettingOcCoefficientDO> ocList = ocEntry.getValue();
 
             // 按 rank 分组，并使用TreeMap排序
@@ -99,10 +101,12 @@ public class OCWeightUpdate {
                 JSONObject slotMap = new JSONObject(true);
                 for (Map.Entry<String, List<TornSettingOcCoefficientDO>> slotEntry : groupedBySlot.entrySet()) {
                     String slotCode = slotEntry.getKey();
+                    // 去除岗位编码中的所有空格
+                    String processedSlotCode = slotCode.replaceAll("\\s+", "");
                     List<TornSettingOcCoefficientDO> slotList = slotEntry.getValue();
 
                     // 标准化 slotCode：如果该基础岗位只有一个变体，则去掉 #1；否则保留后缀
-                    String normalizedSlotCode = normalizeSlotCode(slotCode, baseSlotsWithMultipleVariants);
+                    String normalizedSlotCode = normalizeSlotCode(processedSlotCode, baseSlotsWithMultipleVariants);
 
                     // 按 passRateMin 排序并构建数组 [[min, max, coefficient], ...]
                     JSONArray coefficientArrays = new JSONArray();
@@ -124,7 +128,7 @@ public class OCWeightUpdate {
                 rankMap.put(String.valueOf(rank), slotMap);
             }
 
-            result.put(ocName, rankMap);
+            result.put(processedOcName, rankMap);
         }
 
         return result;
