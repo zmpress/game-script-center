@@ -7,8 +7,8 @@
 // @run-at       document-start
 // @connect      *
 // @license      MIT
-// @updateURL    https://raw.githubusercontent.com/zmpress/game_script/refs/heads/main/porn_city/userscript/OCFacilitation.js
-// @downloadURL    https://raw.githubusercontent.com/zmpress/game_script/refs/heads/main/porn_city/userscript/OCFacilitation.js
+// @updateURL    https://raw.githubusercontent.com/zmpress/game-script-center/refs/heads/main/torn-city/src/main/resources/tampermonkey-scripts/better-OC-recommended.js
+// @downloadURL    https://raw.githubusercontent.com/zmpress/game-script-center/refs/heads/main/torn-city/src/main/resources/tampermonkey-scripts/better-OC-recommended.js
 
 // ==/UserScript==
 
