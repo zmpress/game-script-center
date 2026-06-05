@@ -457,6 +457,7 @@
             if (userOC) {
                 const mappedCrime = {
                     id: userOC.id,
+                    difficulty: userOC.difficulty, // 添加 difficulty 字段
                     ready_at: userOC.ready_at,
                     slots: userOC.slots.map(s => ({
                         user_id: s.user ? s.user.id : null,
@@ -561,36 +562,35 @@
                 });
                 container.appendChild(fragment);
             } else {
-                // 如果关闭可视化，用文字显示 OC 冷却时间
+                // 如果关闭可视化，用文字显示 OC 冷却时间和等级
                 const ocTimeText = this.calculateOCTimeText(userCrime);
                 const timeDiv = document.createElement('div');
                 timeDiv.style.display = 'flex';
                 timeDiv.style.alignItems = 'center';
                 timeDiv.style.gap = '3px';
                 timeDiv.style.fontSize = '11px';
-                timeDiv.style.color = '#666';
                 timeDiv.style.padding = '0'; // 确保没有padding
                 timeDiv.style.margin = '0'; // 确保没有margin
-                
+                                
+                // 获取 OC 等级（difficulty 字段）
+                const difficulty = userCrime.difficulty || '?';
+                console.log('[OCQuickDisplay] OC difficulty:', difficulty, 'userCrime:', userCrime);
+                                
                 const labelSpan = document.createElement('span');
-                labelSpan.textContent = 'OC:';
-                labelSpan.style.fontWeight = '500';
-                labelSpan.style.color = '#000';
-                
+                labelSpan.textContent = `OC(${difficulty}):`;
+                labelSpan.style.fontWeight = '600';
+
                 const timeSpan = document.createElement('span');
                 timeSpan.textContent = ocTimeText;
                 timeSpan.className = 'oc-cooldown-time';
-                timeSpan.style.fontWeight = '500';
-                
+
                 // 计算剩余秒数用于颜色判断
                 const remainingSeconds = this.parseOCTimeToSeconds(ocTimeText);
                 const warningTime = 300; // OC 默认预警时间 5 分钟
                 if (warningTime && remainingSeconds <= warningTime) {
                     timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
-                } else {
-                    timeSpan.style.color = '#000'; // 默认黑色
                 }
-                
+
                 timeDiv.appendChild(labelSpan);
                 timeDiv.appendChild(timeSpan);
                 container.appendChild(timeDiv);
@@ -616,24 +616,23 @@
                 cooldownContainer.style.gap = '8px';
                 cooldownContainer.style.marginLeft = '10px';
                 cooldownContainer.style.fontSize = '11px';
-                cooldownContainer.style.color = '#666';
 
                 // 将冷却时间容器放在 slotIcons 的右侧
                 slotIcons.style.display = 'flex';
                 slotIcons.style.alignItems = 'center';
                 slotIcons.style.padding = '0'; // 手机端移除padding，避免额外空隙
-                
+
                 const wrapper = document.createElement('div');
                 wrapper.style.display = 'flex';
                 wrapper.style.alignItems = 'center';
                 wrapper.style.padding = '0'; // 确保wrapper没有额外padding
                 wrapper.style.margin = '0'; // 确保wrapper没有额外margin
-                
+
                 // 只有当 slotIcons 有内容时才添加
                 if (slotIcons.children.length > 0) {
                     wrapper.appendChild(slotIcons);
                 }
-                
+
                 wrapper.appendChild(cooldownContainer);
                 container.innerHTML = '';
                 container.appendChild(wrapper);
@@ -646,7 +645,6 @@
                 cooldownContainer.style.alignContent = 'flex-start';
                 cooldownContainer.style.marginTop = '4px';
                 cooldownContainer.style.fontSize = '11px';
-                cooldownContainer.style.color = '#666';
                 cooldownContainer.style.padding = '2px 0';
                 cooldownContainer.style.lineHeight = '1';
                 cooldownContainer.style.marginBottom = '0';
@@ -689,7 +687,7 @@
 
                 const timeText = seconds > 0 ? this.formatCooldownTime(seconds) : this.formatCooldownTime(0);
                 const warningTime = CONFIG.COOLDOWN_SETTINGS.WARNING_TIME[item.key.toUpperCase()];
-                let colorStyle = 'color: #000;'; // 默认黑色
+                let colorStyle = '';
 
                 if (warningTime && seconds <= warningTime) {
                     colorStyle = 'color: #FF0000;'; // 低于预警时间显示红色
@@ -699,8 +697,8 @@
                 const displayContent = showIcons ? item.icon : `${item.label}:`;
 
                 itemDiv.innerHTML = `
-                    <span>${displayContent}</span>
-                    <span class="cooldown-time" style="${colorStyle} font-weight: 500;">${timeText}</span>
+                    <span style="font-weight: 600;">${displayContent}</span>
+                    <span class="cooldown-time" style="${colorStyle}">${timeText}</span>
                 `;
 
                 // 添加点击跳转事件
@@ -1162,7 +1160,7 @@
                     if (warningTime && remainingSeconds[key] <= warningTime) {
                         timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
                     } else {
-                        timeSpan.style.color = '#000'; // 默认黑色
+                        timeSpan.style.color = ''; // 使用默认颜色
                     }
                 });
             }, 1000);
