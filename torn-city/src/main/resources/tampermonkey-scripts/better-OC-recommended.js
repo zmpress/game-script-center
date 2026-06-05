@@ -344,7 +344,10 @@
     }
 
     function normalizeRole(role) {
-        return String(role ?? "").replace(/\s+/g, "").trim();
+        // 去除所有空格
+        // return String(role ?? "").replace(/\s+/g, "").trim();
+        // 只去除首尾空格，保留中间的空格（如 "Cat Burglar"）
+        return String(role ?? "").trim();
     }
 
     function parseIntSafe(v) {
