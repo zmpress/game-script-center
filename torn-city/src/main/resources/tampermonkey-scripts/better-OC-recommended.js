@@ -219,9 +219,9 @@
      */
     function getCurrentUserInfo() {
         // 尝试从页面中获取用户信息
-        const menuInfoRow = document.querySelector('.menu-info-row___nRClV');
+        const menuInfoRow = document.querySelector('[class^="menu-info-row___"]');
         if (menuInfoRow) {
-            const nameLink = menuInfoRow.querySelector('a.menu-value___vn8gN');
+            const nameLink = menuInfoRow.querySelector('a[class^="menu-value___"]');
             if (nameLink) {
                 const href = nameLink.getAttribute('href');
                 const match = href ? href.match(/XID=(\d+)/) : null;
@@ -443,8 +443,8 @@
 
             // 如果不是空缺，检查是否是当前用户占用
             if (!isVacant) {
-                // 查找用户名元素
-                const userNameEl = child.querySelector('.textName___X5wiu');
+                // 查找用户名元素（使用通用选择器匹配 class 以 textName 开头的元素）
+                const userNameEl = child.querySelector('[class^="textName___"]');
                 if (userNameEl) {
                     const userName = userNameEl.textContent.trim();
                     // 如果用户名匹配当前用户，说明是当前用户占用的岗位
@@ -704,9 +704,9 @@
         }
         recommendBtn.addEventListener('click', async () => {
             // 检查是否在 Recruiting 页签
-            const activeTab = document.querySelector('.buttonsContainer___yYIas .button___QqDaS.active___ILnLJ');
+            const activeTab = document.querySelector('[class^="buttonsContainer___"] [class^="button___"].active___ILnLJ');
             if (activeTab) {
-                const tabName = activeTab.querySelector('.tabName___Ri9Gx');
+                const tabName = activeTab.querySelector('[class^="tabName___"]');
                 if (tabName && tabName.textContent.trim() !== 'Recruiting') {
                     showNotification('⚠️ 请切换到"未完成 OC"（Recruiting）页签后再开启推荐', 3000);
                     return;
@@ -1103,7 +1103,7 @@
                     hasClassPrefix(child, "waitingJoin");
 
                 // 检查这个岗位是否是当前用户占用的
-                const userNameEl = child.querySelector('.textName___X5wiu');
+                const userNameEl = child.querySelector('[class^="textName___"]');
                 let isCurrentUserSlot = false;
                 if (userNameEl && currentUserName) {
                     const userName = userNameEl.textContent.trim();
@@ -1190,7 +1190,7 @@
             const chance = chanceEl ? parseIntSafe(chanceEl.textContent) : NaN;
 
             // 检查这个岗位是否是当前用户占用的
-            const userNameEl = child.querySelector('.textName___X5wiu');
+            const userNameEl = child.querySelector('[class^="textName___"]');
             let isCurrentUserSlot = false;
             if (userNameEl && currentUserName) {
                 const userName = userNameEl.textContent.trim();
@@ -2416,19 +2416,19 @@
      * 监听标签切换事件
      */
     function setupTabSwitchListener() {
-        const buttonsContainer = document.querySelector('.buttonsContainer___yYIas');
+        const buttonsContainer = document.querySelector('[class^="buttonsContainer___"]');
         if (!buttonsContainer) return;
         
         // 使用事件委托监听按钮点击
         buttonsContainer.addEventListener('click', (e) => {
-            const button = e.target.closest('.button___QqDaS');
+            const button = e.target.closest('[class^="button___"]');
             if (!button) return;
             
             // 延迟检查，等待标签切换完成
             setTimeout(() => {
-                const activeTab = document.querySelector('.buttonsContainer___yYIas .button___QqDaS.active___ILnLJ');
+                const activeTab = document.querySelector('[class^="buttonsContainer___"] [class^="button___"].active___ILnLJ');
                 if (activeTab) {
-                    const tabName = activeTab.querySelector('.tabName___Ri9Gx');
+                    const tabName = activeTab.querySelector('[class^="tabName___"]');
                     if (tabName) {
                         const currentTab = tabName.textContent.trim();
                         
