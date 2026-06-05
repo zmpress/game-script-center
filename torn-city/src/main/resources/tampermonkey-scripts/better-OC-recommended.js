@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         OC优化和推荐
-// @version      2.0
+// @version      0.9
 // @description  优化 Torn 派系犯罪卡片的显示效果，并增加多级排序、筛选和简化开关，增加大锅饭总工分显示，集成智能推荐系统（基于当前成功率和系数配置）
 // @author       zmpress [3633431]
 // @match        https://www.torn.com/factions.php?step=your*
