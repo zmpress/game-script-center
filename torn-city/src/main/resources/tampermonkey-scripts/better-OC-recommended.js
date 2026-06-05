@@ -23,7 +23,7 @@
 
     // 默认值为 'false'。只有当 localStorage 明确存为 'true' 时才为 true（原版显示）。
     const simplifyEnabled = localStorage.getItem(LS_KEY_SIMPLIFY) === 'true';
-    
+
     // 显示其他人工分开关（默认为 true，显示其他人工分）
     const showOthersScore = localStorage.getItem(LS_KEY_SHOW_OTHERS_SCORE) !== 'false';
 
@@ -39,11 +39,11 @@
     // 推荐模式状态（默认为 false，需要手动开启）
     // 注意：这里强制设置为 false，不读取 localStorage，确保每次打开页面都是关闭状态
     let recommendMode = false;
-    
+
     // 当前用户信息
     let currentUserId = null;
     let currentUserName = '';
-    
+
     // 推荐显示相关变量
     let lastRecommendationExecution = 0; // 上次推荐执行时间
     const RECOMMEND_DEBOUNCE_TIME = 5000; // 5秒防抖延迟（防止标签切换频繁触发）
@@ -215,31 +215,53 @@
     }
 
     /**
-     * 从页面获取当前用户信息
+     * 从 Torn API 获取当前用户信息（包含 id 和 name）
      */
-    function getCurrentUserInfo() {
-        // 尝试从页面中获取用户信息
-        const menuInfoRow = document.querySelector('[class^="menu-info-row___"]');
-        if (menuInfoRow) {
-            const nameLink = menuInfoRow.querySelector('a[class^="menu-value___"]');
-            if (nameLink) {
-                const href = nameLink.getAttribute('href');
-                const match = href ? href.match(/XID=(\d+)/) : null;
-                if (match) {
-                    currentUserId = match[1];
-                    currentUserName = nameLink.textContent.trim();
-                    console.log('[OCSort] 获取到当前用户信息:', currentUserName, '(ID:', currentUserId + ')');
+    async function getCurrentUserInfo() {
+        if (!apiKey) {
+            console.log('[OCSort] 未设置 API Key，无法获取用户信息');
+            return;
+        }
+
+        // 尝试从缓存获取用户信息
+        const cachedUserInfo = localStorage.getItem('z_playerInfo');
+        if (cachedUserInfo) {
+            try {
+                const userInfo = JSON.parse(cachedUserInfo);
+                if (userInfo && userInfo.id) {
+                    currentUserId = String(userInfo.id);
+                    currentUserName = userInfo.name || 'Unknown';
+                    console.log('[OCSort] 使用缓存的用户信息:', currentUserName, '(ID:', currentUserId + ')');
                     return;
                 }
+            } catch (e) {
+                console.error('[OCSort] 解析缓存用户信息失败:', e);
             }
         }
-        
-        // 如果页面中没有找到，尝试从 localStorage 获取
-        const playerId = localStorage.getItem('sessionTokenOwner') || localStorage.getItem('PlayerId');
-        if (playerId) {
-            currentUserId = playerId;
-            currentUserName = 'Unknown';
-            console.log('[OCSort] 从 localStorage 获取到用户 ID:', currentUserId);
+
+        // 缓存不存在或无效，从 API 获取
+        const url = `https://api.torn.com/user/?selections=basic&key=${apiKey}`;
+
+        try {
+            console.log('[OCSort] 正在从 Torn API 获取用户信息...');
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (data.error) {
+                throw new Error(`API错误: ${data.error.error}`);
+            }
+
+            // 缓存包含 id 和 name 的用户信息
+            const userInfo = {
+                id: data.player_id,
+                name: data.name || 'Unknown'
+            };
+            localStorage.setItem('z_playerInfo', JSON.stringify(userInfo));
+            currentUserId = String(userInfo.id);
+            currentUserName = userInfo.name;
+            console.log('[OCSort] 成功获取并缓存用户信息:', currentUserName, '(ID:', currentUserId + ')');
+        } catch (error) {
+            console.error('[OCSort] 获取玩家信息失败:', error);
         }
     }
 
@@ -501,7 +523,7 @@
     loadXishuTable().then(() => {
         console.log('[OCSort] 系数表初始化完成');
         xishuTableLoaded = true; // 标记为已加载
-        
+
         // 系数表加载完成后，重新应用徽章（如果页面已经有卡片）
         const existingCards = document.querySelectorAll('[data-oc-id]');
         if (existingCards.length > 0) {
@@ -721,29 +743,29 @@
                     return;
                 }
             }
-                    
+
             // 如果系数表还未加载完成，等待加载
             if (!xishuTableLoaded) {
                 showNotification('⏳ 正在加载系数表，请稍候...', 2000);
                 console.log('[OCSort] 系数表尚未加载完成，等待中...');
-                        
+
                 // 等待最多 5 秒
                 const maxWaitTime = 5000;
                 const startTime = Date.now();
-                        
+
                 while (!xishuTableLoaded && (Date.now() - startTime) < maxWaitTime) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
-                        
+
                 if (!xishuTableLoaded) {
                     showNotification('❌ 系数表加载超时，请检查网络连接或刷新页面', 3000);
                     console.error('[OCSort] 系数表加载超时');
                     return;
                 }
-                        
+
                 console.log('[OCSort] 系数表加载完成，继续执行');
             }
-                    
+
             recommendMode = !recommendMode;
             localStorage.setItem(LS_KEY_RECOMMEND_MODE, recommendMode);
 
@@ -760,7 +782,7 @@
             // 清空缓存，强制重新计算
             currentRecommendations = [];
             lastRecommendationExecution = 0;
-            
+
             // 重新应用显示
             applyOverlays();
             applyRecommendDisplay();
@@ -979,7 +1001,7 @@
         // 防止无限循环：执行期间暂时断开监听
         if (appearObserver) appearObserver.disconnect();
         if (removalObserver) removalObserver.disconnect();
-        
+
         const allCards = Array.from(document.querySelectorAll('[data-oc-id]'));
         if (allCards.length === 0) return;
 
@@ -2277,26 +2299,26 @@
             currentRecommendations = [];
             return;
         }
-            
+
         // 如果正在切换标签，跳过本次执行
         if (isTabSwitching) {
             console.log('[OCSort] 检测到标签切换中，跳过推荐执行');
             return;
         }
-            
+
         // 防抖检查：防止频繁执行
         const now = Date.now();
         if (now - lastRecommendationExecution < RECOMMEND_DEBOUNCE_TIME) {
             console.log('[OCSort] 推荐算法正在防抖中，跳过本次执行');
             return;
         }
-            
+
         // 防止并发执行
         if (recommendationExecuting) {
             console.log('[OCSort] 推荐算法正在执行中，跳过本次调用');
             return;
         }
-        
+
         // 检查系数表是否已加载
         if (!xishuTableLoaded) {
             console.log('[OCSort] 系数表尚未加载完成，等待加载...');
@@ -2309,14 +2331,14 @@
             applyRecommendationToCards(currentRecommendations);
             return;
         }
-            
+
         recommendationExecuting = true;
         lastRecommendationExecution = now;
-            
+
         try {
             // 执行推荐算法
             const recommendations = executeRecommendation(5);
-                
+
             if (recommendations.length === 0) {
                 currentRecommendations = [];
                 return;
@@ -2324,7 +2346,7 @@
 
             // 缓存推荐结果
             currentRecommendations = recommendations;
-                
+
             applyRecommendationToCards(recommendations);
         } catch (e) {
             console.error('[OCSort] 推荐算法执行失败:', e);
@@ -2342,22 +2364,22 @@
         if (!recommendations || recommendations.length === 0) {
             return;
         }
-            
+
         // 为推荐的 OC 添加标记，隐藏非推荐的 OC
         const cards = Array.from(document.querySelectorAll('[data-oc-id]'));
         cards.forEach(card => {
             const ocId = card.dataset.ocId;
             const rec = recommendations.find(r => r.ocId === ocId);
-                
+
             if (rec) {
                 // 显示的 OC：移除隐藏类
                 card.classList.remove('oc-hidden-card');
-                    
+
                 // 只在样式不同时才更新，避免闪烁
                 const newBorder = '3px solid #ffd700';
                 const newBoxShadow = '0 0 15px rgba(255, 215, 0, 0.6)';
                 const newOpacity = '1';
-                
+
                 if (card.style.border !== newBorder) {
                     card.style.border = newBorder;
                 }
@@ -2367,14 +2389,14 @@
                 if (card.style.opacity !== newOpacity) {
                     card.style.opacity = newOpacity;
                 }
-                    
+
                 // 添加或更新推荐语徽章
                 const scenario = card.querySelector('[class*="scenario___"]');
                 if (scenario) {
                     // 检查是否已有相同的徽章
                     const existingBadge = scenario.querySelector('.oc-recommend-badge');
                     const badgeText = `🌟 ${rec.reason}`;
-                    
+
                     if (existingBadge && existingBadge.textContent === badgeText) {
                         // 徽章内容相同，不需要更新
                     } else {
@@ -2388,7 +2410,7 @@
                         badge.className = 'oc-recommend-badge';
                         badge.textContent = badgeText;
                         badge.title = `推荐分数: ${rec.recommendScore}\n推荐岗位: ${rec.recommendedPosition}`;
-                            
+
                         Object.assign(badge.style, {
                             position: 'absolute',
                             top: '-10px',
@@ -2403,7 +2425,7 @@
                             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
                             whiteSpace: 'nowrap'
                         });
-                            
+
                         scenario.style.position = 'relative';
                         scenario.appendChild(badge);
                     }
@@ -2427,12 +2449,12 @@
     function setupTabSwitchListener() {
         const buttonsContainer = document.querySelector('[class^="buttonsContainer___"]');
         if (!buttonsContainer) return;
-        
+
         // 使用事件委托监听按钮点击
         buttonsContainer.addEventListener('click', (e) => {
             const button = e.target.closest('[class^="button___"]');
             if (!button) return;
-            
+
             // 延迟检查，等待标签切换完成
             setTimeout(() => {
                 const activeTab = document.querySelector('[class^="buttonsContainer___"] [class^="button___"].active___ILnLJ');
@@ -2440,24 +2462,24 @@
                     const tabName = activeTab.querySelector('[class^="tabName___"]');
                     if (tabName) {
                         const currentTab = tabName.textContent.trim();
-                        
+
                         // 如果从 Recruiting 切换到其他标签，且推荐模式开启
                         if (lastActiveTab === 'Recruiting' && currentTab !== 'Recruiting' && recommendMode) {
                             console.log('[OCSort] 检测到从 Recruiting 切换到其他标签，暂停推荐');
                             isTabSwitching = true;
-                            
+
                             // 清除之前的定时器
                             if (tabSwitchTimeout) {
                                 clearTimeout(tabSwitchTimeout);
                             }
-                            
+
                             // 设置较长的等待时间
                             tabSwitchTimeout = setTimeout(() => {
                                 isTabSwitching = false;
                                 tabSwitchTimeout = null;
                             }, 2000);
                         }
-                        
+
                         lastActiveTab = currentTab;
                     }
                 }
@@ -2470,7 +2492,7 @@
         // 防止无限循环：执行期间暂时断开监听
         if (appearObserver) appearObserver.disconnect();
         if (removalObserver) removalObserver.disconnect();
-        
+
         const cards = document.querySelectorAll('[data-oc-id]');
         cards.forEach((c, index) => {
 
@@ -2500,7 +2522,7 @@
         if (recommendMode) {
             applyRecommendDisplay();
         }
-        
+
         // 所有操作完成后，恢复监听
         if (currentListElement && document.body.contains(currentListElement)) {
             watchCrimesListRemoval(currentListElement, () => applyOverlays());
@@ -2577,17 +2599,17 @@
             if (tabSwitchTimeout) {
                 clearTimeout(tabSwitchTimeout);
             }
-            
+
             // 设置标签切换标记，防止立即执行
             isTabSwitching = true;
-            
+
             // 延长等待时间到 1.5 秒，确保页面完全渲染
             tabSwitchTimeout = setTimeout(() => {
                 isTabSwitching = false;
                 tabSwitchTimeout = null;
                 console.log('[OCSort] 标签切换完成，允许推荐执行');
             }, 1500);
-            
+
             // 清空缓存，强制重新计算
             currentRecommendations = [];
             // 重置防抖时间，给页面渲染留出足够时间
@@ -2615,7 +2637,7 @@
                 }
             }, 100);
         }
-        
+
         applyFiltersAndSorting(); // 始终应用排序和筛选
     }
 

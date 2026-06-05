@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         OC进度及其他信息快捷显示
-// @version      1.4
+// @version      0.9
 // @description  显示 oc 进度，显示drug，medical，booster 的剩余时间，显示 refill 信息，均可设置是否显示
 // @author       zmpress [3633431]
 // @match        https://www.torn.com/*
@@ -50,6 +50,7 @@
 
     const CONFIG = {
         USER_ID: '',
+        USER_NAME: '', // 当前用户名称
         CACHE: {
             OC_DATA_DURATION: 30, // Organized Crime API 缓存时间，单位：秒 (默认 30 秒)
             COOLDOWN_DURATION: 30, // Cooldowns API 缓存时间，单位：秒 (默认 30 秒)
@@ -286,9 +287,20 @@
             }
         }
 
-        static async getPlayerId() {
-            const playerId = localStorage.getItem('sessionTokenOwner') || localStorage.getItem('PlayerId');
-            if (playerId !== null) return parseInt(playerId);
+        static async getPlayerInfo() {
+            // 尝试从缓存获取用户信息
+            const cachedUserInfo = localStorage.getItem('z_playerInfo');
+            if (cachedUserInfo) {
+                try {
+                    const userInfo = JSON.parse(cachedUserInfo);
+                    if (userInfo && userInfo.id) {
+                        console.log('[OCQuickDisplay] 使用缓存的用户信息:', userInfo.name, '(ID:', userInfo.id + ')');
+                        return userInfo;
+                    }
+                } catch (e) {
+                    console.error('[OCQuickDisplay] 解析缓存用户信息失败:', e);
+                }
+            }
 
             const apiKey = localStorage.getItem("z_tornMinimalKey");
             if (!apiKey) return null;
@@ -298,8 +310,14 @@
                 const data = await response.json();
                 if (data.error) throw new Error(`API错误: ${data.error.error}`);
 
-                localStorage.setItem('PlayerId', data.player_id);
-                return parseInt(data.player_id);
+                // 缓存包含 id 和 name 的用户信息
+                const userInfo = {
+                    id: data.player_id,
+                    name: data.name || 'Unknown'
+                };
+                localStorage.setItem('z_playerInfo', JSON.stringify(userInfo));
+                console.log('[OCQuickDisplay] 从 API 获取并缓存用户信息:', userInfo.name, '(ID:', userInfo.id + ')');
+                return userInfo;
             } catch (error) {
                 console.error('获取玩家信息失败:', error);
                 return null;
@@ -398,9 +416,13 @@
                 return;
             }
 
-            // 确保我们有 USER_ID（用来标记自己的星星标记）
+            // 确保我们有用户信息（用来标记自己的星星标记）
             if (!CONFIG.USER_ID) {
-                CONFIG.USER_ID = await APIManager.getPlayerId();
+                const userInfo = await APIManager.getPlayerInfo();
+                if (userInfo) {
+                    CONFIG.USER_ID = userInfo.id;
+                    CONFIG.USER_NAME = userInfo.name;
+                }
             }
 
             const response = await APIManager.getUserOCData();
@@ -479,7 +501,9 @@
                     localStorage.setItem('z_tornMinimalKey', val);
                     // 2. 清除之前的错误请求缓存以强制刷新
                     localStorage.removeItem('z_api2_userOrganizedcrime');
-                    // 3. 重新渲染状态图标
+                    // 3. 清除用户信息缓存，下次重新获取
+                    localStorage.removeItem('z_playerInfo');
+                    // 4. 重新渲染状态图标
                     this.updateStatusIcons();
                 }
             });
@@ -859,7 +883,7 @@
                 resetBtn.style.color = '#ff9800';
             });
             resetBtn.addEventListener('click', () => {
-                if (confirm('确定要恢复默认设置吗？\n\n将删除以下内容：\n- 所有自定义配置\n- API Key\n- 所有接口缓存数据\n\n此操作不可恢复！')) {
+                if (confirm('确定要恢复默认设置吗？\n\n将删除以下内容：\n- 所有自定义配置\n- API Key\n- 所有接口缓存数据\n- 用户信息缓存\n\n此操作不可恢复！')) {
                     // 删除配置
                     localStorage.removeItem('z_config');
                     // 删除 API Key
@@ -868,8 +892,8 @@
                     localStorage.removeItem('z_api2_userOrganizedcrime');
                     localStorage.removeItem('z_api2_userCooldowns');
                     localStorage.removeItem('z_api2_userRefills');
-                    // 删除玩家 ID
-                    localStorage.removeItem('PlayerId');
+                    // 删除用户信息缓存
+                    localStorage.removeItem('z_playerInfo');
                     
                     console.log('✅ 已清除所有脚本数据和缓存');
                     window.location.reload();

@@ -1,0 +1,7 @@
+https://cdn.jsdelivr.net/gh/zmpress/game-script-center@main/torn-city/src/main/resources/config/dahuofan-weight/20465.json
+https://cdn.jsdelivr.net/gh/zmpress/game-script-center@main/torn-city/src/main/resources/config/dahuofan-weight/27902.json
+
+
+// 刷新 cdn 地址，可能有延迟，不会及时生效
+https://www.jsdelivr.com/tools/purge?utm_source=chatgpt.com
+
