@@ -593,6 +593,13 @@
 
                 timeDiv.appendChild(labelSpan);
                 timeDiv.appendChild(timeSpan);
+                
+                // 添加点击跳转事件
+                timeDiv.style.cursor = 'pointer';
+                timeDiv.addEventListener('click', () => {
+                    window.location.href = `https://www.torn.com/factions.php?step=your#/tab=crimes`;
+                });
+                
                 container.appendChild(timeDiv);
             }
         }
