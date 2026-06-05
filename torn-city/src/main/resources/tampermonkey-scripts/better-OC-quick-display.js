@@ -1025,7 +1025,7 @@
             title.style.cssText = 'margin: 0 0 10px 0; font-size: 14px; color: #555;';
             section.appendChild(title);
 
-            section.appendChild(this.createToggle('显示图标', CONFIG.COOLDOWN_SETTINGS.SHOW_ICONS, (v) => { CONFIG.COOLDOWN_SETTINGS.SHOW_ICONS = v; }));
+            section.appendChild(this.createToggle('显示图标(关闭为文字)', CONFIG.COOLDOWN_SETTINGS.SHOW_ICONS, (v) => { CONFIG.COOLDOWN_SETTINGS.SHOW_ICONS = v; }));
             section.appendChild(this.createToggle('显示药物', CONFIG.COOLDOWN_SETTINGS.SHOW_DRUG, (v) => { CONFIG.COOLDOWN_SETTINGS.SHOW_DRUG = v; }));
             section.appendChild(this.createToggle('显示医疗', CONFIG.COOLDOWN_SETTINGS.SHOW_MEDICAL, (v) => { CONFIG.COOLDOWN_SETTINGS.SHOW_MEDICAL = v; }));
             section.appendChild(this.createToggle('显示啤酒', CONFIG.COOLDOWN_SETTINGS.SHOW_BOOSTER, (v) => { CONFIG.COOLDOWN_SETTINGS.SHOW_BOOSTER = v; }));
