@@ -1192,11 +1192,13 @@
             const secs = seconds % 60;
 
             if (days > 0) {
-                return `${days}d ${hours}h`;
+                return `${days}d ${hours}h ${minutes}m`;
             } else if (hours > 0) {
                 return `${hours}h ${minutes}m`;
-            } else if (minutes >= 1) {
+            } else if (minutes >= 5) {
                 return `${minutes}m`;
+            } else if (minutes >= 1) {
+                return `${minutes}m ${secs}s`;
             } else {
                 return `${secs}s`;
             }
