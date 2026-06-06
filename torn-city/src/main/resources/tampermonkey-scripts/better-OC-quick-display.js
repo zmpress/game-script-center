@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         OC进度及其他信息快捷显示
-// @version      1.0
+// @version      1.1
 // @description  显示 oc 进度，显示drug，medical，booster 的剩余时间，显示 refill 信息，均可设置是否显示
 // @author       zmpress [3633431]
 // @match        https://www.torn.com/*
@@ -229,13 +229,18 @@
                 if (cachedDataStr && !forceRefresh) {
                     const parsed = JSON.parse(cachedDataStr);
                     data = parsed.data;
+                    // 如果有缓存时间信息，调整 ready_at
+                    if (parsed.last_fetched_time && data && data.ready_at) {
+                        const timePassed = Math.floor((currentTime - parsed.last_fetched_time) / 1000);
+                        data.ready_at = data.ready_at - timePassed;
+                    }
                     fromCache = true;
                     console.log('[OCQuickDisplay] 使用缓存的 OC 数据');
                 }
 
                 // 检查是否需要后台刷新
                 const needRefresh = !cachedDataStr || (currentTime - JSON.parse(cachedDataStr || '{}').last_fetched_time >= cacheExpirationTime) || forceRefresh;
-                
+
                 if (needRefresh) {
                     // 后台异步请求新数据
                     this.refreshOCData(apiKey, cacheKey).then(newData => {
@@ -305,12 +310,22 @@
                 if (cachedDataStr && !forceRefresh) {
                     const parsed = JSON.parse(cachedDataStr);
                     data = parsed.data;
+                    // 如果有缓存时间信息，调整冷却时间
+                    if (parsed.last_fetched_time && data) {
+                        const timePassed = Math.floor((currentTime - parsed.last_fetched_time) / 1000);
+                        // 对每个冷却项减去经过的时间
+                        Object.keys(data).forEach(key => {
+                            if (typeof data[key] === 'number') {
+                                data[key] = Math.max(0, data[key] - timePassed);
+                            }
+                        });
+                    }
                     console.log('[OCQuickDisplay] 使用缓存的 Cooldowns 数据');
                 }
 
                 // 检查是否需要后台刷新
                 const needRefresh = !cachedDataStr || (currentTime - JSON.parse(cachedDataStr || '{}').last_fetched_time >= cacheExpirationTime) || forceRefresh;
-                
+
                 if (needRefresh) {
                     // 后台异步请求新数据
                     this.refreshCooldownsData(apiKey, cacheKey).then(newData => {
@@ -418,7 +433,7 @@
 
                 // 检查是否需要后台刷新
                 const needRefresh = !cachedDataStr || (currentTime - JSON.parse(cachedDataStr || '{}').last_fetched_time >= cacheExpirationTime) || forceRefresh;
-                
+
                 if (needRefresh) {
                     // 后台异步请求新数据
                     this.refreshRefillsData(apiKey, cacheKey).then(newData => {
@@ -575,10 +590,10 @@
                 this.renderNonParticipatingStatus(slotIcons);
             }
             // 如果关闭了 OC 显示，slotIcons 会是空的，但会继续显示冷却时间
-            
+
             // 将 slotIcons 添加到主容器
             ocStatusContainer.appendChild(slotIcons);
-            
+
             // 直接渲染冷却时间，不再重复请求 API
             this.renderCooldownDisplay(ocStatusContainer, slotIcons, cooldowns, refills);
         }
@@ -586,7 +601,7 @@
         renderApiKeyInput(container, errorMsg = "") {
             const isMobile = Utils.isMobileDevice();
             const inputContainer = document.createElement('div');
-            
+
             // 电脑端使用垂直布局，手机端保持水平布局
             if (isMobile) {
                 inputContainer.style.display = 'flex';
@@ -669,11 +684,11 @@
                 timeDiv.style.fontSize = '11px';
                 timeDiv.style.padding = '0'; // 确保没有padding
                 timeDiv.style.margin = '0'; // 确保没有margin
-                                
+
                 // 获取 OC 等级（difficulty 字段）
                 const difficulty = userCrime.difficulty || '?';
                 console.log('[OCQuickDisplay] OC difficulty:', difficulty, 'userCrime:', userCrime);
-                                
+
                 const labelSpan = document.createElement('span');
                 labelSpan.textContent = `OC(${difficulty}):`;
                 labelSpan.style.fontWeight = '600';
@@ -692,14 +707,17 @@
 
                 timeDiv.appendChild(labelSpan);
                 timeDiv.appendChild(timeSpan);
-                
+
                 // 添加点击跳转事件
                 timeDiv.style.cursor = 'pointer';
                 timeDiv.addEventListener('click', () => {
                     window.location.href = `https://www.torn.com/factions.php?step=your#/tab=crimes`;
                 });
-                
+
                 container.appendChild(timeDiv);
+
+                // 启动 OC 时间定时器
+                this.startOCTimeTimer(timeSpan, userCrime);
             }
         }
 
@@ -902,9 +920,9 @@
                 setTimeout(() => this.addSettingsButtonToSystemIcons(), 500);
                 return;
             }
-                    
+
             console.log('找到系统图标容器:', statusIconsContainer);
-                    
+
             // 检查是否已经添加过
             if (document.getElementById('oc-settings-system-icon')) {
                 console.log('设置按钮已存在，跳过添加');
@@ -1063,7 +1081,7 @@
                     localStorage.removeItem('z_api2_userRefills');
                     // 删除用户信息缓存
                     localStorage.removeItem('z_playerInfo');
-                    
+
                     console.log('✅ 已清除所有脚本数据和缓存');
                     window.location.reload();
                 }
@@ -1270,6 +1288,35 @@
             }, 1000);
         }
 
+        startOCTimeTimer(timeSpan, userCrime) {
+            // 清除可能存在的旧 OC 定时器
+            if (this.ocTimeTimerId) {
+                clearInterval(this.ocTimeTimerId);
+            }
+
+            // 计算初始剩余秒数
+            let remainingSeconds = this.parseOCTimeToSeconds(timeSpan.textContent);
+
+            // 每秒更新一次
+            this.ocTimeTimerId = setInterval(() => {
+                if (remainingSeconds > 0) {
+                    remainingSeconds--;
+                }
+
+                const timeText = this.formatCooldownTime(remainingSeconds);
+                timeSpan.textContent = timeText;
+
+                // 根据预警时间设置颜色
+                const warningTimeMinutes = CONFIG.OC_SETTINGS.WARNING_TIME || 300;
+                const warningTimeSeconds = warningTimeMinutes * 60;
+                if (warningTimeSeconds && remainingSeconds <= warningTimeSeconds) {
+                    timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
+                } else {
+                    timeSpan.style.color = ''; // 使用默认颜色
+                }
+            }, 1000);
+        }
+
         formatCooldownTime(seconds) {
             // 确保最小为 0
             if (seconds <= 0) return '0s';
@@ -1299,7 +1346,7 @@
             }
 
             const currentTime = Math.floor(Date.now() / 1000); // 当前时间戳（秒）
-            
+
             // 计算空槽位数
             let emptySlots = 0;
             userCrime.slots.forEach(slot => {
