@@ -437,19 +437,20 @@
                 }
             }
 
-            // 如果开启了 OC 时间显示，才获取和显示 OC 数据
-            let userOC = null;
-            if (CONFIG.OC_SETTINGS.SHOW_OC_TIME) {
-                const response = await APIManager.getUserOCData();
+            // 并行请求所有 API 数据，提升加载速度
+            const [ocResponse, cooldowns, refills] = await Promise.all([
+                CONFIG.OC_SETTINGS.SHOW_OC_TIME ? APIManager.getUserOCData() : Promise.resolve(null),
+                APIManager.getUserCooldowns(),
+                APIManager.getUserRefills()
+            ]);
 
-                // 如果发生 Api key 无效等错误，则渲染输入框重新输入
-                if (response && response.error) {
-                    this.renderApiKeyInput(ocStatusContainer, response.message);
-                    return;
-                }
-
-                userOC = response ? response.data : null;
+            // 处理 OC 数据错误
+            if (ocResponse && ocResponse.error) {
+                this.renderApiKeyInput(ocStatusContainer, ocResponse.message);
+                return;
             }
+
+            const userOC = ocResponse ? ocResponse.data : null;
 
             // 创建一个 slotIcons 容器用于存放 OC 内容
             const slotIcons = this.createSlotIconsContainer();
@@ -481,8 +482,8 @@
             // 将 slotIcons 添加到主容器
             ocStatusContainer.appendChild(slotIcons);
             
-            // 无论是否显示 OC，都显示其他冷却时间
-            await this.addCooldownDisplay(ocStatusContainer, slotIcons);
+            // 直接渲染冷却时间，不再重复请求 API
+            this.renderCooldownDisplay(ocStatusContainer, slotIcons, cooldowns, refills);
         }
 
         renderApiKeyInput(container, errorMsg = "") {
@@ -604,11 +605,8 @@
             }
         }
 
-        async addCooldownDisplay(container, slotIcons) {
-            const cooldowns = await APIManager.getUserCooldowns();
+        renderCooldownDisplay(container, slotIcons, cooldowns, refills) {
             if (!cooldowns) return;
-
-            const refills = await APIManager.getUserRefills();
 
             const isMobile = Utils.isMobileDevice();
             const cooldownContainer = document.createElement('div');
