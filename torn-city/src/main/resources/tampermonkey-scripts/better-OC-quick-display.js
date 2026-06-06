@@ -29,7 +29,8 @@
         },
         OC_SETTINGS: {
             SHOW_OC_TIME: true,
-            VISUALIZE_PROGRESS: true
+            VISUALIZE_PROGRESS: true,
+            WARNING_TIME: 300 // OC 预警时间，单位：分钟（默认 300 分钟 = 5 小时）
         },
         COOLDOWN_SETTINGS: {
             SHOW_ICONS: true,
@@ -62,7 +63,8 @@
         },
         OC_SETTINGS: { // OC 相关设置
             SHOW_OC_TIME: true, // 显示 OC 剩余时间和进度
-            VISUALIZE_PROGRESS: true // 可视化 OC 进度（false 时用文字显示）
+            VISUALIZE_PROGRESS: true, // 可视化 OC 进度（false 时用文字显示）
+            WARNING_TIME: 300 // OC 预警时间，单位：分钟（默认 300 分钟 = 5 小时）
         },
         COOLDOWN_SETTINGS: { // true 打开 / false 关闭
             SHOW_ICONS: true, // 显示图标（false 时显示文字标签）
@@ -682,8 +684,9 @@
 
                 // 计算剩余秒数用于颜色判断
                 const remainingSeconds = this.parseOCTimeToSeconds(ocTimeText);
-                const warningTime = 300; // OC 默认预警时间 5 分钟
-                if (warningTime && remainingSeconds <= warningTime) {
+                const warningTimeMinutes = CONFIG.OC_SETTINGS.WARNING_TIME || 300; // OC 预警时间（分钟）
+                const warningTimeSeconds = warningTimeMinutes * 60; // 转换为秒
+                if (warningTimeSeconds && remainingSeconds <= warningTimeSeconds) {
                     timeSpan.style.color = '#FF0000'; // 低于预警时间显示红色
                 }
 
@@ -1105,6 +1108,7 @@
 
             section.appendChild(this.createToggle('显示 OC 剩余时间', CONFIG.OC_SETTINGS.SHOW_OC_TIME, (v) => { CONFIG.OC_SETTINGS.SHOW_OC_TIME = v; }));
             section.appendChild(this.createToggle('可视化 OC 进度（关闭则用文字显示）', CONFIG.OC_SETTINGS.VISUALIZE_PROGRESS, (v) => { CONFIG.OC_SETTINGS.VISUALIZE_PROGRESS = v; }));
+            section.appendChild(this.createNumberInput('OC 预警时间(分钟)', CONFIG.OC_SETTINGS.WARNING_TIME, (val) => { CONFIG.OC_SETTINGS.WARNING_TIME = parseInt(val) || 300; }, 1440));
 
             return section;
         }
@@ -1160,7 +1164,7 @@
             return section;
         }
 
-        createNumberInput(label, value, onChange) {
+        createNumberInput(label, value, onChange, max = 300) {
             const div = document.createElement('div');
             div.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0;';
 
@@ -1173,7 +1177,7 @@
             input.type = 'number';
             input.value = value;
             input.min = '1';
-            input.max = '300';
+            input.max = max;
             input.style.cssText = 'width: 80px; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; text-align: center;';
             input.addEventListener('change', (e) => onChange(e.target.value));
 
