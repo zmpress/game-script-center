@@ -209,8 +209,8 @@
 
     // =============== API管理类 ===============
     class APIManager {
-        // 使用 Torn 官方 V2 API 获取个人 OC 数据 (带有时间缓存机制)
-        static async getUserOCData() {
+        // 使用 Torn 官方 V2 API 获取个人 OC 数据 (缓存优先策略)
+        static async getUserOCData(forceRefresh = false) {
             const apiKey = localStorage.getItem("z_tornMinimalKey");
             if (!apiKey) return { error: true, message: "请输入 API Key" };
 
@@ -220,42 +220,74 @@
                 const currentTime = Date.now();
                 const cacheExpirationTime = CONFIG.CACHE.OC_DATA_DURATION * 1000;
 
-                // 判断缓存是否在有效期内
-                if (cachedDataStr) {
+                let fromCache = false;
+                let data = null;
+
+                // 优先使用缓存（即使过期也先返回）
+                if (cachedDataStr && !forceRefresh) {
                     const parsed = JSON.parse(cachedDataStr);
-                    if (currentTime - parsed.last_fetched_time < cacheExpirationTime) {
-                        return { data: parsed.data };
-                    }
+                    data = parsed.data;
+                    fromCache = true;
+                    console.log('[OCQuickDisplay] 使用缓存的 OC 数据');
                 }
 
-                // 缓存已过期，请求新数据
-                const response = await fetch(`${CONFIG.API.TORN_V2_URL}${CONFIG.API.ENDPOINTS.USER_OC}?key=${apiKey}`);
-                const data = await response.json();
-
-                if (data.error) {
-                    console.error(`Torn API错误: ${data.error.error}`);
-                    // 如果因为 Key 错误导致报错，通知重新输入
-                    if (data.error.code === 1 || data.error.code === 2 || data.error.code === 18) {
-                        return { error: true, message: "API Key 无效，请检查" };
-                    }
-                    return null; // 其他服务器错误
+                // 检查是否需要后台刷新
+                const needRefresh = !cachedDataStr || (currentTime - JSON.parse(cachedDataStr || '{}').last_fetched_time >= cacheExpirationTime) || forceRefresh;
+                
+                if (needRefresh) {
+                    // 后台异步请求新数据
+                    this.refreshOCData(apiKey, cacheKey).then(newData => {
+                        if (newData && window.__ocStatusManager) {
+                            // 用新数据更新显示
+                            window.__ocStatusManager.updateStatusIcons();
+                        }
+                    });
                 }
 
-                // 将成功返回的数据存入缓存
-                localStorage.setItem(cacheKey, JSON.stringify({
-                    data: data.organizedCrime,
-                    last_fetched_time: currentTime
-                }));
+                // 立即返回缓存数据
+                if (data) {
+                    return { data, fromCache };
+                }
 
-                return { data: data.organizedCrime };
+                // 如果没有缓存，等待请求完成
+                const newData = await this.refreshOCData(apiKey, cacheKey);
+                return newData ? { data: newData, fromCache: false } : null;
             } catch (error) {
                 console.error('获取玩家OC数据失败:', error);
                 return null;
             }
         }
 
-        // 获取用户冷却时间数据
-        static async getUserCooldowns() {
+        // 后台刷新 OC 数据
+        static async refreshOCData(apiKey, cacheKey) {
+            try {
+                const response = await fetch(`${CONFIG.API.TORN_V2_URL}${CONFIG.API.ENDPOINTS.USER_OC}?key=${apiKey}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    console.error(`Torn API错误: ${data.error.error}`);
+                    if (data.error.code === 1 || data.error.code === 2 || data.error.code === 18) {
+                        return { error: true, message: "API Key 无效，请检查" };
+                    }
+                    return null;
+                }
+
+                const currentTime = Date.now();
+                localStorage.setItem(cacheKey, JSON.stringify({
+                    data: data.organizedCrime,
+                    last_fetched_time: currentTime
+                }));
+
+                console.log('[OCQuickDisplay] OC 数据已刷新');
+                return data.organizedCrime;
+            } catch (error) {
+                console.error('刷新OC数据失败:', error);
+                return null;
+            }
+        }
+
+        // 获取用户冷却时间数据（缓存优先策略）
+        static async getUserCooldowns(forceRefresh = false) {
             const apiKey = localStorage.getItem("z_tornMinimalKey");
             if (!apiKey) return null;
 
@@ -265,15 +297,44 @@
                 const currentTime = Date.now();
                 const cacheExpirationTime = CONFIG.CACHE.COOLDOWN_DURATION * 1000;
 
-                // 判断缓存是否在有效期内
-                if (cachedDataStr) {
+                let data = null;
+
+                // 优先使用缓存（即使过期也先返回）
+                if (cachedDataStr && !forceRefresh) {
                     const parsed = JSON.parse(cachedDataStr);
-                    if (currentTime - parsed.last_fetched_time < cacheExpirationTime) {
-                        return parsed.data;
-                    }
+                    data = parsed.data;
+                    console.log('[OCQuickDisplay] 使用缓存的 Cooldowns 数据');
                 }
 
-                // 缓存已过期，请求新数据
+                // 检查是否需要后台刷新
+                const needRefresh = !cachedDataStr || (currentTime - JSON.parse(cachedDataStr || '{}').last_fetched_time >= cacheExpirationTime) || forceRefresh;
+                
+                if (needRefresh) {
+                    // 后台异步请求新数据
+                    this.refreshCooldownsData(apiKey, cacheKey).then(newData => {
+                        if (newData && window.__ocStatusManager) {
+                            // 用新数据更新显示
+                            window.__ocStatusManager.updateStatusIcons();
+                        }
+                    });
+                }
+
+                // 立即返回缓存数据
+                if (data) {
+                    return data;
+                }
+
+                // 如果没有缓存，等待请求完成
+                return await this.refreshCooldownsData(apiKey, cacheKey);
+            } catch (error) {
+                console.error('获取冷却时间数据失败:', error);
+                return null;
+            }
+        }
+
+        // 后台刷新 Cooldowns 数据
+        static async refreshCooldownsData(apiKey, cacheKey) {
+            try {
                 const response = await fetch(`${CONFIG.API.TORN_V2_URL}${CONFIG.API.ENDPOINTS.USER_COOLDOWNS}?key=${apiKey}`);
                 const data = await response.json();
 
@@ -282,15 +343,16 @@
                     return null;
                 }
 
-                // 将成功返回的数据存入缓存
+                const currentTime = Date.now();
                 localStorage.setItem(cacheKey, JSON.stringify({
                     data: data.cooldowns,
                     last_fetched_time: currentTime
                 }));
 
+                console.log('[OCQuickDisplay] Cooldowns 数据已刷新');
                 return data.cooldowns;
             } catch (error) {
-                console.error('获取冷却时间数据失败:', error);
+                console.error('刷新Cooldowns数据失败:', error);
                 return null;
             }
         }
@@ -332,8 +394,8 @@
             }
         }
 
-        // 获取用户补充状态数据
-        static async getUserRefills() {
+        // 获取用户补充状态数据（缓存优先策略）
+        static async getUserRefills(forceRefresh = false) {
             const apiKey = localStorage.getItem("z_tornMinimalKey");
             if (!apiKey) return null;
 
@@ -343,15 +405,44 @@
                 const currentTime = Date.now();
                 const cacheExpirationTime = CONFIG.CACHE.REFILLS_DURATION * 1000;
 
-                // 判断缓存是否在有效期内
-                if (cachedDataStr) {
+                let data = null;
+
+                // 优先使用缓存（即使过期也先返回）
+                if (cachedDataStr && !forceRefresh) {
                     const parsed = JSON.parse(cachedDataStr);
-                    if (currentTime - parsed.last_fetched_time < cacheExpirationTime) {
-                        return parsed.data;
-                    }
+                    data = parsed.data;
+                    console.log('[OCQuickDisplay] 使用缓存的 Refills 数据');
                 }
 
-                // 缓存已过期，请求新数据
+                // 检查是否需要后台刷新
+                const needRefresh = !cachedDataStr || (currentTime - JSON.parse(cachedDataStr || '{}').last_fetched_time >= cacheExpirationTime) || forceRefresh;
+                
+                if (needRefresh) {
+                    // 后台异步请求新数据
+                    this.refreshRefillsData(apiKey, cacheKey).then(newData => {
+                        if (newData && window.__ocStatusManager) {
+                            // 用新数据更新显示
+                            window.__ocStatusManager.updateStatusIcons();
+                        }
+                    });
+                }
+
+                // 立即返回缓存数据
+                if (data) {
+                    return data;
+                }
+
+                // 如果没有缓存，等待请求完成
+                return await this.refreshRefillsData(apiKey, cacheKey);
+            } catch (error) {
+                console.error('获取补充状态数据失败:', error);
+                return null;
+            }
+        }
+
+        // 后台刷新 Refills 数据
+        static async refreshRefillsData(apiKey, cacheKey) {
+            try {
                 const response = await fetch(`${CONFIG.API.TORN_V2_URL}${CONFIG.API.ENDPOINTS.USER_REFILLS}?key=${apiKey}`);
                 const data = await response.json();
 
@@ -360,15 +451,16 @@
                     return null;
                 }
 
-                // 将成功返回的数据存入缓存
+                const currentTime = Date.now();
                 localStorage.setItem(cacheKey, JSON.stringify({
                     data: data.refills,
                     last_fetched_time: currentTime
                 }));
 
+                console.log('[OCQuickDisplay] Refills 数据已刷新');
                 return data.refills;
             } catch (error) {
-                console.error('获取补充状态数据失败:', error);
+                console.error('刷新Refills数据失败:', error);
                 return null;
             }
         }
@@ -416,6 +508,9 @@
         }
 
         async updateStatusIcons() {
+            // 保存当前实例引用，供后台刷新使用
+            window.__ocStatusManager = this;
+
             const ocStatusContainer = document.getElementById('oc-status-container');
             if (!ocStatusContainer) return;
 
