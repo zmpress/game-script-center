@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         OC进度及其他信息快捷显示
-// @version      1.1
+// @version      1.2
 // @description  显示 oc 进度，显示drug，medical，booster 的剩余时间，显示 refill 信息，均可设置是否显示
 // @author       zmpress [3633431]
 // @match        https://www.torn.com/*
@@ -103,7 +103,7 @@
                 WAITING: '[class^="waitingJoin___"]',
                 TITLE: '[class^="title___"]',
                 PANEL_TITLE: '[class^="panelTitle___"]',
-                MOBILE_INFO: '[class^="user-information-mobile___"]',
+                MOBILE_INFO: '[class^="user-information-mobile___"], [class^="userInformationMobile___"]',
                 STATUS_ICONS: '[class^="status-icons___"]',
                 LEVEL_VALUE: '[class^="levelValue___"]'
             },
